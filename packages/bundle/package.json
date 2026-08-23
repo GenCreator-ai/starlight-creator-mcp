@@ -5,16 +5,41 @@
   "license": "MIT",
   "type": "module",
   "mcpName": "io.github.frankxai/starlight-creator-mcp",
-  "bin": { "starlight-creator-mcp": "./dist/main.js" },
+  "bin": {
+    "starlight-creator-mcp": "./dist/main.js"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "README.md", "server.json"],
-  "keywords": ["mcp", "model-context-protocol", "creator", "byok", "openrouter", "image-generation", "video-generation", "provenance", "starlight"],
-  "repository": { "type": "git", "url": "https://github.com/frankxai/starlight-creator-mcp.git", "directory": "packages/bundle" },
+  "files": [
+    "dist",
+    "README.md",
+    "server.json",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "creator",
+    "byok",
+    "openrouter",
+    "image-generation",
+    "video-generation",
+    "provenance",
+    "starlight"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/frankxai/starlight-creator-mcp.git",
+    "directory": "packages/bundle"
+  },
   "homepage": "https://github.com/frankxai/starlight-creator-mcp",
   "author": "Frank Riemer <https://frankx.ai>",
-  "engines": { "node": ">=22.13" },
-  "scripts": { "build": "tsc -b" },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
   "dependencies": {
     "@starlight-intelligence/creator-cli": "workspace:*",
     "@starlight-intelligence/creator-server": "workspace:*",

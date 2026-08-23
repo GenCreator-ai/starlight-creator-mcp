@@ -14,7 +14,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "repository": {
     "type": "git",
@@ -38,5 +39,8 @@
   },
   "bin": {
     "creator-mcp": "./dist/main.js"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

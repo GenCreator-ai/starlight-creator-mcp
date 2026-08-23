@@ -15,7 +15,8 @@
   "files": [
     "dist",
     "data",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "repository": {
     "type": "git",
@@ -33,5 +34,8 @@
   },
   "dependencies": {
     "@starlight-intelligence/creator-core": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
