@@ -27,7 +27,9 @@ Verified locally 2026-08-22 (`main` `4185596`): `doctor` exit 0 with starter pac
 
 After the first publish, the install path becomes `npx -y starlight-creator-mcp`. Until then, point MCP clients at `node /absolute/path/to/packages/bundle/dist/main.js`.
 
-Providers in this tree: **OpenRouter**, **MuAPI**, **Google Gemini**. fal and ElevenLabs are optional later adapters, not required to run doctor.
+Providers in this tree: **OpenRouter** (text, images, async video, transcription), **MuAPI** (226-model image/video catalog), **ElevenLabs** (speech, sound effects, music), **Google Gemini** (vision judge). Each activates only when its key is present; `doctor` runs with none of them.
+
+Storage: **local** (default, always on), **S3-compatible** (AWS S3, Cloudflare R2, MinIO — `setup --storage`), **rclone** (any remote it supports). Publishing media needs a connector that can produce a public URL, so local-only installs can generate and score but not attach images to posts.
 
 ## Tools (16)
 
@@ -43,7 +45,8 @@ Every tool has an input schema, an output schema (`structuredContent`) and annot
 | `@starlight-intelligence/creator-server` | MCP server factory (`createCreatorServer`) + tools/resources/prompts |
 | `@starlight-intelligence/creator-packs-spec` | `creator-pack-manifest.v1` schema, validator, merge rules, `creator-pack` CLI |
 | `@starlight-intelligence/creator-cli` | `creator-mcp stdio | http | setup | doctor | init | approve | packs | inspect` |
-| `@starlight-intelligence/creator-provider-{openrouter,muapi,google}` | provider adapters |
+| `@starlight-intelligence/creator-provider-{openrouter,muapi,elevenlabs,google}` | provider adapters |
+| `@starlight-intelligence/creator-storage-s3` | optional S3/R2 connector (the AWS SDK is never a required install) |
 | `starlight-creator-mcp` | the installable bundle |
 
 ## Build a brand on it

@@ -20,6 +20,8 @@ const ORDER = [
   'packages/providers/openrouter',
   'packages/providers/muapi',
   'packages/providers/google',
+  'packages/providers/elevenlabs',
+  'packages/storage-s3',
   'packages/server',
   'packages/cli',
   'packages/bundle',

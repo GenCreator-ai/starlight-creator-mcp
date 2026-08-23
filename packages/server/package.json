@@ -42,12 +42,16 @@
     "@starlight-intelligence/creator-packs-spec": "workspace:*",
     "@starlight-intelligence/creator-provider-muapi": "workspace:*",
     "@starlight-intelligence/creator-provider-openrouter": "workspace:*",
-    "@starlight-intelligence/creator-provider-google": "workspace:*"
+    "@starlight-intelligence/creator-provider-google": "workspace:*",
+    "@starlight-intelligence/creator-provider-elevenlabs": "workspace:*"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "optionalDependencies": {
+    "@starlight-intelligence/creator-storage-s3": "workspace:*"
   }
 }

@@ -4,6 +4,7 @@ import { errorResult } from './errors.js'
 import { registerPrompts } from './prompts.js'
 import { registerResources } from './resources.js'
 import type { AnyToolDef } from './tool-def.js'
+import { defaultStorageConnectors } from './defaults.js'
 import { assets, assetSync, models, score } from './tools/assets.js'
 import { loadCompositeTools } from './tools/composite.js'
 import { generateAudio, generateImage, generateVideo, jobStatus, transcribe } from './tools/generate.js'
@@ -35,7 +36,7 @@ export interface CreatorServerOptions {
 export interface CreatorServer { server: McpServer; ctx: CreatorContext; toolNames: string[] }
 
 export async function createCreatorServer(opts: CreatorServerOptions): Promise<CreatorServer> {
-  const ctx = opts.context ?? (await CreatorContext.create({ packs: opts.packs, providers: opts.providers, ...(opts.storageConnectors ? { storageConnectors: opts.storageConnectors } : {}), ...(opts.packsByBenefit ? { packsByBenefit: opts.packsByBenefit } : {}), ...(opts.dev !== undefined ? { dev: opts.dev } : {}) }))
+  const ctx = opts.context ?? (await CreatorContext.create({ packs: opts.packs, providers: opts.providers, storageConnectors: opts.storageConnectors ?? defaultStorageConnectors, ...(opts.packsByBenefit ? { packsByBenefit: opts.packsByBenefit } : {}), ...(opts.dev !== undefined ? { dev: opts.dev } : {}) }))
   const server = new McpServer({ name: opts.name, version: opts.version }, { instructions: opts.instructions ?? defaultInstructions(ctx) })
   const curation = opts.tools ?? {}
   const hidden = new Set(curation.hide ?? [])

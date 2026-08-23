@@ -25,6 +25,9 @@
     },
     {
       "path": "../providers/google"
+    },
+    {
+      "path": "../providers/elevenlabs"
     }
   ]
 }

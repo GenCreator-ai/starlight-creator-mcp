@@ -33,7 +33,8 @@ beforeAll(async () => {
     env: {
       ...process.env,
       CREATOR_MCP_HOME: home, CREATOR_PACKS: STARTER, CREATOR_ALLOW_PRIVATE_HOSTS: '1', CREATOR_VAULT_BACKEND: 'encrypted-file', CREATOR_LOG_LEVEL: 'warn',
-      MUAPI_BASE_URL: mock.url, OPENROUTER_BASE_URL: mock.url, MUAPI_KEY: 'test-muapi-key-000000', OPENROUTER_API_KEY: 'test-openrouter-key-000000',
+      MUAPI_BASE_URL: mock.url, OPENROUTER_BASE_URL: mock.url, ELEVENLABS_BASE_URL: mock.url,
+      MUAPI_KEY: 'test-muapi-key-000000', OPENROUTER_API_KEY: 'test-openrouter-key-000000', ELEVENLABS_API_KEY: 'test-eleven-key-000000',
     },
   })
   await client.connect(transport)
@@ -60,7 +61,7 @@ describe('creator-mcp over stdio', () => {
     expect(res.models.some(m => m.id === 'openrouter/openai/gpt-image-1')).toBe(true)
     expect(res.models.some(m => m.id.startsWith('muapi/'))).toBe(true)
     expect(res.default_for_task).toBe('muapi/nano-banana-pro')
-    expect(res.providers).toEqual([{ id: 'openrouter', configured: true }, { id: 'muapi', configured: true }, { id: 'google', configured: false }])
+    expect(res.providers).toEqual([{ id: 'openrouter', configured: true }, { id: 'muapi', configured: true }, { id: 'elevenlabs', configured: true }, { id: 'google', configured: false }])
   })
 
   it('routes a logo prompt to the typography preference and stores the asset with provenance', async () => {
@@ -148,6 +149,25 @@ describe('creator-mcp over stdio', () => {
     const prep = structured<{ warnings: string[] }>(await client.callTool({ name: 'creator_publication_prepare', arguments: { posts: [{ channel_id: 'outbox', text: 'We unlock 340% growth', assets: [] }], claims: [{ text: '340% growth', type: 'numerical' }] } }))
     expect(prep.warnings.some(w => w.includes('blocked'))).toBe(true)
     expect(prep.warnings.some(w => w.includes('banned phrase "unlock"'))).toBe(true)
+  })
+
+  it('generates speech, sound effects and music through the audio provider', async () => {
+    const tts = structured<{ status: string; asset?: { kind: string; mime: string } }>(await client.callTool({ name: 'creator_generate_audio', arguments: { kind: 'tts', text: 'The first gate opens at dawn.' } }))
+    expect(tts.status).toBe('completed')
+    expect(tts.asset?.kind).toBe('audio')
+    // no voice given, so the provider resolved one from the account
+    expect(mock.state.elevenCalls.at(-1)?.path).toBe('/v1/text-to-speech/voice_mock_1')
+
+    const sfx = structured<{ status: string; asset?: { kind: string } }>(await client.callTool({ name: 'creator_generate_audio', arguments: { kind: 'sfx', prompt: 'distant thunder over water', duration_s: 4 } }))
+    expect(sfx.status).toBe('completed')
+    expect(sfx.asset?.kind).toBe('audio')
+    expect((mock.state.elevenCalls.at(-1)?.body as { duration_seconds?: number }).duration_seconds).toBe(4)
+
+    const music = structured<{ status: string }>(await client.callTool({ name: 'creator_generate_audio', arguments: { kind: 'music', prompt: 'slow ambient strings', duration_s: 12 } }))
+    expect(music.status).toBe('completed')
+    expect(mock.state.elevenCalls.at(-1)?.path).toBe('/v1/music/compose')
+    // seconds are converted to the API's milliseconds, clamped to its 3s-600s range
+    expect((mock.state.elevenCalls.at(-1)?.body as { music_length_ms?: number }).music_length_ms).toBe(12_000)
   })
 
   it('license status is honest when no key is configured', async () => {

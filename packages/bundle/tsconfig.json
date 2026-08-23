@@ -1,1 +1,27 @@
-{ "extends": "../../tsconfig.base.json", "compilerOptions": { "rootDir": "src", "outDir": "dist" }, "include": ["src"], "references": [{ "path": "../cli" }, { "path": "../server" }, { "path": "../core" }, { "path": "../packs-spec" }] }
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../cli"
+    },
+    {
+      "path": "../server"
+    },
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../packs-spec"
+    },
+    {
+      "path": "../storage-s3"
+    }
+  ]
+}

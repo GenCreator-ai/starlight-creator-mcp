@@ -20,6 +20,12 @@
       "path": "packages/server"
     },
     {
+      "path": "packages/providers/elevenlabs"
+    },
+    {
+      "path": "packages/storage-s3"
+    },
+    {
       "path": "packages/cli"
     },
     {

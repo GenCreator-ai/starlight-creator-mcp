@@ -1,0 +1,40 @@
+{
+  "name": "@starlight-intelligence/creator-provider-elevenlabs",
+  "version": "0.1.0",
+  "description": "ElevenLabs adapter for the creator substrate: text-to-speech, sound effects and music composition with the user's own key.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/frankxai/starlight-creator-mcp.git",
+    "directory": "packages/providers/elevenlabs"
+  },
+  "homepage": "https://github.com/frankxai/starlight-creator-mcp",
+  "author": "Frank Riemer <https://frankx.ai>",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --root ../.."
+  },
+  "dependencies": {
+    "@starlight-intelligence/creator-core": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

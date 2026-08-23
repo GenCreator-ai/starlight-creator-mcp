@@ -44,6 +44,7 @@
     "@starlight-intelligence/creator-cli": "workspace:*",
     "@starlight-intelligence/creator-server": "workspace:*",
     "@starlight-intelligence/creator-core": "workspace:*",
-    "@starlight-intelligence/creator-packs-spec": "workspace:*"
+    "@starlight-intelligence/creator-packs-spec": "workspace:*",
+    "@starlight-intelligence/creator-storage-s3": "workspace:*"
   }
 }
