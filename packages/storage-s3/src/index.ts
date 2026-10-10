@@ -25,7 +25,12 @@ export class S3Storage implements StorageConnector {
   private readonly maxBytes: number
 
   constructor(private readonly o: S3StorageOptions) {
-    this.prefix = (o.prefix ?? '').replace(/^\/+|\/+$/g, '')
+    const prefix = o.prefix ?? ''
+    let start = 0
+    let end = prefix.length
+    while (start < end && prefix[start] === '/') start++
+    while (end > start && prefix[end - 1] === '/') end--
+    this.prefix = prefix.slice(start, end)
     this.maxBytes = o.fetchPolicy?.maxBytes ?? 200 * 1024 * 1024
     const policy: FetchPolicy = { ...o.fetchPolicy, allowHosts: o.fetchPolicy?.allowHosts ?? [], maxBytes: this.maxBytes }
     this.client = new S3Client({
