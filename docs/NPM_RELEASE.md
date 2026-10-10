@@ -82,12 +82,12 @@ executable malformed-manifest regression covers that recovery boundary.
 10 October follow-up: regression fixtures exposed partial terminators, hidden
 trailing members, incomplete padding and ambiguous path/numeric fields accepted
 by the archive parser. These are now rejected before inspecting or publishing
-content. Directory payloads are denied and directories count toward the500-member
-limit. Compressed2MB/decoded8MB budgets are retained. The previously packed archives
+content. Directory payloads are denied and directories count toward the 500-member
+limit. Compressed 2 MB/decoded 8 MB budgets are retained. The previously packed archives
 still parsed at that revision. The earlier clean receipt,
-review packet and hosted success at1ce433d retain their revision boundaries and
-must be refreshed for this change. Local build admission is held at7222MB free/
-8192required; no new local build or consumer run is claimed. GitHub npm-production
+review packet and hosted success at 1ce433d retain their revision boundaries and
+must be refreshed for this change. That historical local build admission was held
+at 7222 MB free/8192 MB required; it is not current machine admission. GitHub npm-production
 now exists with owner approval and main-only deployment policy. Owner self-review
 and default admin bypass are allowed; this does not satisfy independent review.
 
@@ -107,7 +107,7 @@ connectors are retained; no new checkout, subscription, brand or invented revenu
 stream is introduced. Demand, pricing and competitive advantage still need buyer
 evidence and matched real creation workflows on the existing platforms.
 
-Issue4's remote auth, tenant isolation, staging, trace, rollback, legal/privacy,
+Issue 4's remote auth, tenant isolation, staging, trace, rollback, legal/privacy,
 billing and marketplace gates remain open. HMAC approval proves manifest integrity
 under the local key; it does not attest human presence in a client-supplied response.
 Live provider generation, recovery/cost and independent approval-channel acceptance
@@ -117,7 +117,7 @@ Sources: [pnpm workspace packing](https://pnpm.io/workspaces),
 [official MCP SDK v2](https://ts.sdk.modelcontextprotocol.io/v2/),
 [npm trusted publishers](https://docs.npmjs.com/trusted-publishers/).
 
-## Review remediation validation
+## Review remediation validation history
 
 The remediation uses Node 24.21.0 and pinned pnpm 11.5.0 with frozen installation.
 Build, typecheck, lint, unit, existing e2e and release-contract suites were executed;
@@ -125,8 +125,8 @@ their command output, rather than historical totals above, is the evidence.
 All ten tarballs passed archive/manifest/graph verification and checksum-verified
 Gitleaks 8.30.1 scanning. Installed-consumer verification was attempted but stopped
 at npm install with `SELF_SIGNED_CERT_IN_CHAIN` in the hosted isolated environment.
-No consumer success, clean publication receipt, live provider acceptance, or release
-is claimed. The consumer now also requires a local-only `--omit=optional` install
+That worker attempt produced no consumer success. The consumer also requires a
+local-only `--omit=optional` install
 without S3/AWS and doctor acceptance; publication requires this new evidence.
 
 Local integration preserved hosted session `cfad75da-ca44-4b47-b38f-30756c601c54`
@@ -144,3 +144,14 @@ its own ledger on failure and preserves caller-injected ledgers; doctor closes
 any successfully created context even when later diagnostics fail. Windows file
 removal and injected-ledger ownership fixtures cover recovery. The failed Windows
 run is retained as evidence; it does not count as release acceptance.
+
+Integrated head `5dd78adfbf8ec79756d2d418165ff3c0736aa31b` subsequently passed
+the Linux artifact/installed-consumer job in
+[run 38050251918](https://github.com/frankxai/starlight-creator-mcp/actions/runs/38050251918),
+including the isolated S3-omitted install and doctor checks. Both OS e2e jobs
+passed. The Windows artifact job failed at SQLite cleanup before consumer
+verification; that run's overall result is failure. The cleanup repair requires
+a fresh complete run. Current acceptance follows the exact final head's
+[PR 6 checks](https://github.com/frankxai/starlight-creator-mcp/pull/6/checks)
+and downloaded source/manifest-bound receipts. Historical results cannot attest
+a later revision. No npm publication or live-provider acceptance is claimed.
