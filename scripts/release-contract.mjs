@@ -17,27 +17,43 @@ export function pnpmInvocation(cli) {
   return /\.[cm]?js$/.test(cli) ? { command: process.execPath, prefix: [cli] } : { command: cli, prefix: [] }
 }
 
-// Derived from SIS verify-npm-ecosystem.mjs at 54c41ddf (MIT); budgets fit the creator runtime.
+// Derived from SIS verify-npm-ecosystem.mjs (MIT), with hardening from 44346d9f; budgets fit the creator runtime.
 export function readTar(bytes) {
   if (bytes.length > 2_000_000) throw new Error('Compressed archive budget exceeded')
   const tar = gunzipSync(bytes, { maxOutputLength: 8_000_000 })
+  if (tar.length % 512 !== 0) throw new Error('Incomplete archive block')
   const entries = new Map()
+  const seen = new Set()
   let ended = false
   for (let offset = 0; offset + 512 <= tar.length;) {
     const header = tar.subarray(offset, offset + 512)
-    if (header.every(byte => byte === 0)) { ended = true; break }
+    if (header.every(byte => byte === 0)) {
+      if (offset + 1024 > tar.length || !tar.subarray(offset).every(byte => byte === 0)) throw new Error('Invalid archive terminator or trailing members')
+      ended = true; break
+    }
     const field = (a, b) => header.subarray(a, b).toString().replace(/\0.*$/s, '')
     const name = [field(345, 500), field(0, 100)].filter(Boolean).join('/')
-    if (!name.startsWith('package/') || name.split('/').some(p => p === '..' || p === '.') || /[\\:\x00-\x1f]/.test(name)) throw new Error('Unsafe archive path')
+    const type = field(156, 157)
+    const path = type === '5' ? name.replace(/\/$/, '') : name
+    if (!name.startsWith('package/') || path.split('/').some(p => !p || p === '..' || p === '.') || /[\\:\x00-\x1f\x7f]/.test(name)) throw new Error('Unsafe archive path')
+    const octal = (a, b) => {
+      const value = field(a, b).trim()
+      if (!/^[0-7]+$/.test(value)) throw new Error('Invalid archive numeric field')
+      const number = Number.parseInt(value, 8)
+      if (!Number.isSafeInteger(number)) throw new Error('Invalid archive numeric field')
+      return number
+    }
     const checksum = header.reduce((sum, byte, i) => sum + (i >= 148 && i < 156 ? 32 : byte), 0)
-    if (parseInt(field(148, 156).trim(), 8) !== checksum) throw new Error('Invalid archive checksum')
-    const size = parseInt(field(124, 136).trim(), 8)
+    if (octal(148, 156) !== checksum) throw new Error('Invalid archive checksum')
+    const size = octal(124, 136)
     const next = offset + 512 + Math.ceil(size / 512) * 512
     if (!Number.isSafeInteger(size) || size < 0 || next > tar.length) throw new Error('Invalid archive size')
-    const type = field(156, 157)
     if (!['0', '', '5'].includes(type)) throw new Error('Archive links and extensions are denied')
+    if (type === '5' && size !== 0) throw new Error('Invalid archive directory payload')
+    if (seen.has(path) || seen.size >= 500) throw new Error('Duplicate or excessive archive members')
+    seen.add(path)
+    if (!tar.subarray(offset + 512 + size, next).every(byte => byte === 0)) throw new Error('Invalid archive padding')
     if (type !== '5') {
-      if (entries.has(name) || entries.size >= 500) throw new Error('Duplicate or excessive archive members')
       entries.set(name, tar.subarray(offset + 512, offset + 512 + size))
     }
     offset = next

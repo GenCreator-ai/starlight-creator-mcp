@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { gzipSync } from 'node:zlib'
+import { gzipSync, gunzipSync } from 'node:zlib'
 import { resolve } from 'node:path'
 import { targets, readTar, validateEntries, validateGraph, validateReceipt, digest, integrity, pnpmInvocation } from '../release-contract.mjs'
 import { assertPublishingContext, registryIntegrity } from '../publish-release.mjs'
@@ -35,6 +35,26 @@ test('archive parser rejects traversal, links, missing terminator, duplicate mem
   assert.throws(() => readTar(archive([['package/a', Buffer.from('one')], ['package/a', Buffer.from('two')]])), /Duplicate/)
   assert.throws(() => readTar(gzipSync(Buffer.alloc(512, 65))), /Unsafe|checksum/)
   assert.throws(() => readTar(gzipSync(Buffer.alloc(0))), /Truncated/)
+})
+
+test('archive parser rejects partial terminators, concealed members, incomplete blocks and dirty padding', () => {
+  const raw = gunzipSync(archive([['package/fixture', Buffer.from('fixture')]]))
+  assert.throws(() => readTar(gzipSync(raw.subarray(0, -512))))
+  assert.throws(() => readTar(gzipSync(Buffer.concat([raw, raw]))))
+  assert.throws(() => readTar(gzipSync(raw.subarray(0, -1))))
+  const padding = Buffer.from(raw); padding[519] = 1
+  assert.throws(() => readTar(gzipSync(padding)))
+})
+
+test('archive parser rejects ambiguous paths, malformed octal and directory payloads', () => {
+  for (const name of ['package//file', 'package/./file', 'package/a:b', 'package/a\u007fb']) {
+    assert.throws(() => readTar(archive([[name, Buffer.from('fixture')]])))
+  }
+  const raw = gunzipSync(archive([['package/fixture', Buffer.from('fixture')]]))
+  raw.write('0000000001x\0', 124); raw.fill(32, 148, 156)
+  raw.write(raw.subarray(0, 512).reduce((n, byte) => n + byte, 0).toString(8).padStart(6, '0') + '\0 ', 148)
+  assert.throws(() => readTar(gzipSync(raw)))
+  assert.throws(() => readTar(archive([['package/folder/', Buffer.from('payload')]], '5')))
 })
 
 test('packed entrypoints, declaration files, local dependency protocols and install scripts fail closed', () => {

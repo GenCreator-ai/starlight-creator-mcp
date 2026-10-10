@@ -1,6 +1,6 @@
 # Security model
 
-The MCP client (Claude, Cursor, Antigravity, Codex) is the principal. The substrate trusts it for *content* but never hands it credentials, never executes shell built from inputs, and never publishes without a human-entered code.
+The MCP client (Claude, Cursor, Antigravity, Codex) is the principal. The substrate trusts it for content. Provider credentials remain outside the MCP tool surface, and subprocesses use argument arrays. Publication requires a signed manifest after confirmation through the trusted client or local CLI; the server does not independently verify human presence.
 
 ## Credentials
 - Resolution order: environment variable → OS keychain (`@napi-rs/keyring`: Windows Credential Manager, macOS Keychain, Secret Service) → AES-256-GCM file under `~/.creator-mcp/` (headless fallback, key in `vault.key` 0600 or `CREATOR_VAULT_KEY`).

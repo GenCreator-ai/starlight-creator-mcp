@@ -67,10 +67,22 @@ the same bytes with provenance and scripts disabled. Ambiguous failure stops;
 registry reconciliation precedes a retry. A multi-package release is not atomic.
 The old local --publish path is disabled. No npm token fallback is introduced.
 
+10 October follow-up: regression fixtures exposed partial terminators, hidden
+trailing members, incomplete padding and ambiguous path/numeric fields accepted
+by the archive parser. These are now rejected before inspecting or publishing
+content. Directory payloads are denied and directories count toward the500-member
+limit. Compressed2MB/decoded8MB budgets are retained. All ten release safety tests
+pass; all ten previously packed archives still parse. The earlier clean receipt,
+review packet and hosted success at1ce433d retain their revision boundaries and
+must be refreshed for this change. Local build admission is held at7222MB free/
+8192required; no new local build or consumer run is claimed. GitHub npm-production
+now exists with owner approval and main-only deployment policy. Owner self-review
+and default admin bypass are allowed; this does not satisfy independent review.
+
 Before production release, obtain exact-revision independent provider review;
 verify hosted Linux/Windows artifact consumers; configure all ten npm trusted
 publisher identities for this repository, npm-release.yml and npm-production;
-configure actual environment reviewers/main protection; and finalize account
+verify actual environment reviewers/main protection; and finalize account
 access and the concrete version/receipt set. A YAML environment name alone does
 not enforce review. New-package first-publish windows must be checked immediately
 before dispatch. No npm, cloud or marketplace publication occurred in this slice.
