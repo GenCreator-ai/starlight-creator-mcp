@@ -8,3 +8,4 @@ coverage/
 .creator-mcp/
 *.mcpb
 .DS_Store
+artifacts/

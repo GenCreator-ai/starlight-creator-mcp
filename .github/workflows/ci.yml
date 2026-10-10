@@ -9,19 +9,24 @@ on:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+permissions:
+  contents: read
 jobs:
   typecheck-unit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4  # version comes from package.json packageManager
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version: 22 }
+      - run: npm install --global pnpm@11.5.0
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r --filter './packages/**' run build
+      - run: pnpm run build
       - run: pnpm lint
       - run: npx vitest run packages/packs-spec packages/core
+      - run: pnpm run test:release
   e2e:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     needs: typecheck-unit
@@ -31,14 +36,67 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4  # version comes from package.json packageManager
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version: 22 }
+      - run: npm install --global pnpm@11.5.0
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r --filter './packages/**' run build
+      - run: pnpm run build
       - run: npx vitest run packages/server/test
       - run: node packages/cli/dist/main.js packs
         env:
           CREATOR_MCP_HOME: ${{ runner.temp }}/creator-home
           CREATOR_VAULT_BACKEND: encrypted-file
+  release-artifacts:
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - run: npm install --global pnpm@11.5.0
+      - name: Install digest-pinned secret scanner
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          if [ "$RUNNER_OS" = Windows ]; then
+            archive=gitleaks_8.30.1_windows_x64.zip
+          else
+            archive=gitleaks_8.30.1_linux_x64.tar.gz
+          fi
+          gh release download v8.30.1 --repo gitleaks/gitleaks --pattern "$archive" --pattern gitleaks_8.30.1_checksums.txt --dir "$RUNNER_TEMP/gitleaks"
+          cd "$RUNNER_TEMP/gitleaks"
+          grep " $archive$" gitleaks_8.30.1_checksums.txt | sha256sum --check --strict
+          if [ "$RUNNER_OS" = Windows ]; then
+            echo 'd29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e  gitleaks_8.30.1_windows_x64.zip' | sha256sum --check --strict
+            unzip "$archive" gitleaks.exe
+          else
+            echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks_8.30.1_linux_x64.tar.gz' | sha256sum --check --strict
+            tar -xzf "$archive" gitleaks
+          fi
+          echo "$RUNNER_TEMP/gitleaks" >> "$GITHUB_PATH"
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run build
+      - run: pnpm run test:release
+      - run: pnpm test -- --maxWorkers=1
+      - run: pnpm audit --audit-level=moderate
+      - run: pnpm run verify:release
+      - run: pnpm run test:consumer
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: creator-npm-${{ matrix.os }}-${{ github.sha }}
+          path: artifacts/npm-release/
+          if-no-files-found: error
+          retention-days: 7

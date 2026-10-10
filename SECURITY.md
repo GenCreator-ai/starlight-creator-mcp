@@ -20,6 +20,7 @@ The MCP client (Claude, Cursor, Antigravity, Codex) is the principal. The substr
 - `creator_publication_prepare` computes a canonical payload hash; `creator_publication_approve` requires the human to type the first 8 characters of that hash through an elicitation form (or the `creator-mcp approve` terminal command). The manifest is then HMAC-SHA256 signed with a key that lives in the vault.
 - `creator_publish` verifies signature, expiry (≤ 14 days), recomputed hash and asset bytes before sending; channel sends are idempotent by `sha256(payload_hash | channel | adapter)`; a per-adapter hourly limit is enforced locally.
 - Numerical claims without an evidence asset are marked `blocked` and surfaced as warnings.
+- Confirmation is supplied by the MCP client's elicitation channel or the local CLI. The server authenticates the resulting manifest with HMAC; it does not independently attest that a human supplied the confirmation. A compromised or automated client can return a matching code. Hosts must keep approval entry separate from untrusted agent execution before treating this as an independent human approval boundary.
 
 ## Licenses
 - Polar keys are validated from the user's machine against the public customer-portal endpoint. Offline use is allowed for 14 days after a *successful online* validation of the same key fingerprint; the cache is MAC-signed so editing it does not unlock anything. There are no length or prefix heuristics.

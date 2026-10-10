@@ -1,8 +1,9 @@
 {
-  "name": "starlight-creator-mcp",
-  "version": "0.1.0",
+  "name": "@starlight-intelligence/creator-mcp",
+  "version": "0.1.1",
   "description": "Sovereign creator MCP: BYOK image/video/audio generation, taste scoring, provenance ledger and human-gated publishing on your own machine. The substrate brand packs build on.",
   "license": "MIT",
+  "publishConfig": { "access": "public" },
   "type": "module",
   "mcpName": "io.github.frankxai/starlight-creator-mcp",
   "bin": {

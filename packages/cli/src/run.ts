@@ -170,14 +170,30 @@ async function init(b: CliBrand, args: string[]): Promise<number> {
       if (e.isDirectory()) { await mkdir(resolveInside(target, r), { recursive: true }); await walk(r); continue }
       const out = resolveInside(target, r)
       try { await stat(out); process.stdout.write(`  skip ${r} (exists)\n`); continue } catch { /* new */ }
-      const body = (await readFile(path.join(templates, r), 'utf8')).replace(/\{\{\s*projectName\s*\}\}/g, name).replace(/\{\{\s*brand\s*\}\}/g, b.brand)
+      let body = (await readFile(path.join(templates, r), 'utf8')).replace(/\{\{\s*projectName\s*\}\}/g, name).replace(/\{\{\s*brand\s*\}\}/g, b.brand)
+      if (r === '.mcp.json') {
+        const settings = JSON.parse(body) as { mcpServers?: Record<string, unknown> }
+        if (settings.mcpServers?.creator) settings.mcpServers.creator = {
+          command: process.execPath,
+          args: [path.resolve(process.argv[1] ?? 'packages/bundle/dist/main.js')],
+          env: { CREATOR_MCP_HOME: resolveInside(target, '.creator-mcp') },
+        }
+        body = JSON.stringify(settings, null, 2) + '\n'
+      }
       await mkdir(path.dirname(out), { recursive: true })
-      await writeFile(out, body)
+      try { await writeFile(out, body, { flag: 'wx' }) }
+      catch (err) { if ((err as NodeJS.ErrnoException).code === 'EEXIST') continue; throw err }
       n++
     }
   }
   await walk('')
-  await mkdir(path.join(target, 'assets'), { recursive: true })
+  const workspaceAssets = resolveInside(target, 'assets')
+  await mkdir(workspaceAssets, { recursive: true })
+  const workspaceHome = resolveInside(target, '.creator-mcp')
+  await mkdir(workspaceHome, { recursive: true, mode: 0o700 })
+  const workspaceConfig = resolveInside(target, '.creator-mcp/config.json')
+  try { await writeFile(workspaceConfig, JSON.stringify({ storage: { assetsDir: workspaceAssets } }, null, 2) + '\n', { flag: 'wx', mode: 0o600 }) }
+  catch (err) { if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err }
   process.stdout.write(`initialised ${name} at ${target} (${n} files)\n`)
   return 0
 }

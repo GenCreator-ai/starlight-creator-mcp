@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const publish = process.argv.includes('--publish')
+if (publish) throw new Error('Local publication is disabled. Use the reviewed main-only npm-release.yml OIDC workflow.')
 const skipChecks = process.argv.includes('--skip-checks')
 
 // dependency order: nothing may be published before what it depends on
