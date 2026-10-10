@@ -128,3 +128,12 @@ at npm install with `SELF_SIGNED_CERT_IN_CHAIN` in the hosted isolated environme
 No consumer success, clean publication receipt, live provider acceptance, or release
 is claimed. The consumer now also requires a local-only `--omit=optional` install
 without S3/AWS and doctor acceptance; publication requires this new evidence.
+
+Local integration preserved hosted session `cfad75da-ca44-4b47-b38f-30756c601c54`
+and its immutable base `d4eb90502fdeee0ccd9c3c431cb030324b39ba09` and head
+`a226857738b771ccce7aeedb65f6036ef85f514d` through a merge commit after the cloud
+integration preflight passed. Lead inspection moved both installed consumers into
+separate OS temporary directories. A nested local-only consumer could otherwise
+resolve the omitted S3 package from its full consumer parent or the repository.
+Fresh CI and review apply to the integrated candidate, not the worker's earlier
+tests or certificate-limited install attempt.

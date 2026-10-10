@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateReceipt, targets, digest } from './release-contract.mjs'
@@ -16,8 +16,9 @@ const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encodi
 const files = new Map(receipt.packages.map(row => [row.file, readFileSync(join(releaseDir, row.file))]))
 validateReceipt(receipt, files, sourceSha, false)
 
-const consumer = join(root, 'artifacts', 'consumer-' + randomUUID())
-mkdirSync(consumer, { recursive: true })
+// Keep installed consumers outside the workspace's resolution ancestry. Otherwise
+// an omitted dependency can resolve from the repository or another consumer.
+const consumer = mkdtempSync(join(tmpdir(), 'starlight-creator-consumer-'))
 const dependencies = Object.fromEntries(receipt.packages.map(row => [row.name, 'file:' + join(releaseDir, row.file).replace(/\\/g, '/')]))
 writeFileSync(join(consumer, 'package.json'), JSON.stringify({ name: 'creator-release-consumer', version: '0.0.0', private: true, type: 'module', dependencies,
   devDependencies: { '@modelcontextprotocol/client': '2.3.1', '@types/node': '22.20.1', typescript: '5.9.3' } }, null, 2))
@@ -31,8 +32,7 @@ let check = 'install'
 try {
   run([npmCli, 'install', '--ignore-scripts', '--no-audit', '--no-fund', '--fetch-retries=0', '--fetch-timeout=20000', '--registry=https://registry.npmjs.org'], 300_000)
   check = 'optional-s3'
-  const localOnly = join(consumer, 'local-only')
-  mkdirSync(localOnly)
+  const localOnly = mkdtempSync(join(tmpdir(), 'starlight-creator-local-only-'))
   const localDependencies = Object.fromEntries(Object.entries(dependencies).filter(([name]) => name !== '@starlight-intelligence/creator-storage-s3'))
   writeFileSync(join(localOnly, 'package.json'), JSON.stringify({ name: 'creator-local-only-consumer', version: '0.0.0', private: true, type: 'module', dependencies: localDependencies }))
   execFileSync(process.execPath, [npmCli, 'install', '--omit=optional', '--ignore-scripts', '--no-audit', '--no-fund', '--fetch-retries=0', '--fetch-timeout=20000', '--registry=https://registry.npmjs.org'], { cwd: localOnly, env, stdio: 'pipe', timeout: 300_000 })
