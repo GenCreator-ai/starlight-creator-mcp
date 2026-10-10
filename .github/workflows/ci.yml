@@ -23,6 +23,8 @@ jobs:
         with: { node-version: 22 }
       - run: npm install --global pnpm@11.5.0
       - run: pnpm install --frozen-lockfile
+      - name: Typecheck the clean project dependency graph
+        run: pnpm run typecheck
       - run: pnpm run build
       - run: pnpm lint
       - run: npx vitest run packages/packs-spec packages/core

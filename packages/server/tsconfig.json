@@ -28,6 +28,9 @@
     },
     {
       "path": "../providers/elevenlabs"
+    },
+    {
+      "path": "../storage-s3"
     }
   ]
 }

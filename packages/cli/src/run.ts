@@ -203,7 +203,8 @@ async function init(b: CliBrand, args: string[]): Promise<number> {
 export function clientLaunch(b: CliBrand): { command: string; args: string[] } {
   const entry = path.resolve(process.argv[1] ?? 'packages/bundle/dist/main.js')
   if (/(?:^|[\\/])_npx[\\/]/.test(entry)) {
-    return { command: process.platform === 'win32' ? 'npx.cmd' : 'npx', args: ['--yes', `${b.npmPackage ?? '@starlight-intelligence/creator-cli'}@${b.version}`, 'stdio'] }
+    if (!b.npmPackage) throw new Error('Registry-launched wrappers must declare npmPackage to preserve their package identity')
+    return { command: process.platform === 'win32' ? 'npx.cmd' : 'npx', args: ['--yes', `${b.npmPackage}@${b.version}`, 'stdio'] }
   }
   return { command: process.execPath, args: [entry] }
 }

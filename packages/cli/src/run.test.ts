@@ -28,6 +28,12 @@ describe('stable CLI initialization and doctor', () => {
     process.argv[1] = path.join(dir, 'installed', 'main.js')
     expect(clientLaunch(brand)).toEqual({ command: process.execPath, args: [process.argv[1]] })
   })
+  it('rejects missing registry wrapper identity and preserves an explicit wrapper package', () => {
+    process.argv[1] = path.join(tmpdir(), '_npx', 'fixture', 'node_modules', 'wrapper', 'main.js')
+    expect(() => clientLaunch({ brand: 'custom-wrapper', version: '2.3.4' })).toThrow('must declare npmPackage')
+    expect(clientLaunch({ brand: 'custom-wrapper', version: '2.3.4', npmPackage: '@fixture/custom-wrapper' }).args)
+      .toEqual(['--yes', '@fixture/custom-wrapper@2.3.4', 'stdio'])
+  })
   it('doctor fails on explicitly configured S3 with missing credentials', async () => {
     dir = await mkdtemp(path.join(tmpdir(), 'creator-doctor-'))
     vi.stubEnv('CREATOR_MCP_HOME', dir)

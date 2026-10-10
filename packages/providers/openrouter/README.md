@@ -1,6 +1,6 @@
 # @starlight-intelligence/creator-provider-openrouter
 
-OpenRouter provider for the creator substrate: chat, images, videos, audio, transcription via one key.
+OpenRouter provider for the creator substrate: chat, vision, images, videos and transcription via one key. Audio generation is not implemented by this adapter.
 
 OpenRouter adapter: chat, `/api/v1/images`, asynchronous `/api/v1/videos` (submit, poll, download) and transcription through a single user-supplied key. Also serves as the default vision judge for taste scoring.
 
