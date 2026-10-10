@@ -65,29 +65,56 @@ export async function assertUrlAllowed(url: URL, policy: FetchPolicy): Promise<v
 
 export async function guardedFetch(input: string | URL, init: RequestInit & { policy: FetchPolicy }): Promise<Response> {
   const { policy, ...rest } = init
-  const url = new URL(String(input))
-  await assertUrlAllowed(url, policy)
+  let url = new URL(String(input))
+  let request = { ...rest, headers: new Headers(rest.headers) }
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), policy.timeoutMs ?? 60_000)
   const outerSignal = rest.signal
-  outerSignal?.addEventListener('abort', () => controller.abort(), { once: true })
+  const abort = () => controller.abort()
+  outerSignal?.addEventListener('abort', abort, { once: true })
+  if (outerSignal?.aborted) abort()
   try {
-    const res = await fetch(url, { ...rest, signal: controller.signal, redirect: 'manual' })
-    if (res.status >= 300 && res.status < 400) {
-      const loc = res.headers.get('location')
-      if (!loc) return res
-      const next = new URL(loc, url)
-      await assertUrlAllowed(next, policy).catch(err => { throw new FetchGuardError(`redirect to ${next.host} blocked: ${(err as Error).message}`, 'redirect_blocked') })
-      return guardedFetch(next, init)
+    for (let redirects = 0; ; redirects++) {
+      controller.signal.throwIfAborted()
+      await assertUrlAllowed(url, policy)
+      controller.signal.throwIfAborted()
+      const res = await fetch(url, { ...request, signal: controller.signal, redirect: 'manual' })
+      if ([301, 302, 303, 307, 308].includes(res.status) && res.headers.has('location')) {
+        await res.body?.cancel()
+        if (redirects >= 20) throw new FetchGuardError('redirect limit exceeded', 'redirect_blocked')
+        const next = new URL(res.headers.get('location')!, url)
+        if (next.username || next.password || (url.protocol === 'https:' && next.protocol !== 'https:')) {
+          throw new FetchGuardError('credential-bearing or downgraded redirect blocked', 'redirect_blocked')
+        }
+        await assertUrlAllowed(next, policy).catch(() => { throw new FetchGuardError('redirect destination blocked', 'redirect_blocked') })
+        const method = (request.method ?? 'GET').toUpperCase()
+        if ((res.status === 303 && method !== 'GET' && method !== 'HEAD') || ([301, 302].includes(res.status) && method === 'POST')) {
+          request = { ...request, method: 'GET', body: undefined }
+          for (const header of ['content-encoding', 'content-language', 'content-location', 'content-type', 'content-length']) request.headers.delete(header)
+        }
+        if (next.origin !== url.origin) {
+          // Provider keys can use arbitrary header names. Never forward any caller headers.
+          if (request.body != null || !['GET', 'HEAD'].includes((request.method ?? 'GET').toUpperCase())) {
+            throw new FetchGuardError('cross-origin request payload blocked', 'redirect_blocked')
+          }
+          request = { ...request, headers: new Headers(), credentials: 'omit', referrer: '' }
+        }
+        url = next
+        continue
+      }
+      const len = Number(res.headers.get('content-length') ?? 0)
+      if (policy.maxBytes && len > policy.maxBytes) {
+        await res.body?.cancel()
+        throw new FetchGuardError(`response ${len} bytes exceeds limit ${policy.maxBytes}`, 'too_large')
+      }
+      return res
     }
-    const len = Number(res.headers.get('content-length') ?? 0)
-    if (policy.maxBytes && len > policy.maxBytes) throw new FetchGuardError(`response ${len} bytes exceeds limit ${policy.maxBytes}`, 'too_large')
-    return res
   } catch (err) {
     if ((err as Error).name === 'AbortError') throw new FetchGuardError(`fetch ${url.host} timed out`, 'timeout')
     throw err
   } finally {
     clearTimeout(timeout)
+    outerSignal?.removeEventListener('abort', abort)
   }
 }
 

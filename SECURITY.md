@@ -10,6 +10,7 @@ The MCP client (Claude, Cursor, Antigravity, Codex) is the principal. The substr
 ## Network
 - Every outbound request goes through `guardedFetch`: http(s) only, host allowlist (provider hosts + `policy.allowHosts`), private/link-local/loopback ranges blocked (including DNS results), redirects re-checked, size and time limits. Provider result URLs are fetched only when returned by a provider for a job we created.
 - `import_url` must be on the allowlist; `CREATOR_ALLOW_PRIVATE_HOSTS=1` exists for tests only.
+- Redirects stop after 20 hops and share one request timeout. Cross-origin GET/HEAD redirects drop all caller headers and credentials; other cross-origin payloads, URL credentials and HTTPS downgrades are denied. Redirect response bodies are cancelled, and pre-cancelled calls never start a fetch. The request timer covers redirects through response headers; DNS resolution and subsequent response-body consumption still need their own bounds.
 - The optional HTTP transport binds to 127.0.0.1, validates Host/Origin for localhost, and is stateless per request (no shared in-process state between sessions).
 
 ## Filesystem
