@@ -47,6 +47,12 @@ describe('public URLs', () => {
     expect(new URL(url).searchParams.has('x-amz-checksum-sha256')).toBe(false)
     expect(await storage().presignUpload('b'.repeat(64), 'png', 'image/png', 600)).not.toBe(url)
   })
+  it('includes temporary credential tokens in both presigned upload and download URLs', async () => {
+    const temporary = storage({ sessionToken: 'fixture-session' })
+    for (const url of [await temporary.publicUrl(SHA, 'png'), await temporary.presignUpload(SHA, 'png', 'image/png')]) {
+      expect(new URL(url).searchParams.get('X-Amz-Security-Token')).toBe('fixture-session')
+    }
+  })
 })
 
 describe('createS3Storage', () => {
@@ -58,6 +64,14 @@ describe('createS3Storage', () => {
     await vault.set('S3_SECRET_ACCESS_KEY', 'sk')
     const s3 = await createS3Storage(vault, { bucket: 'assets' })
     expect(s3?.id).toBe('s3')
+  })
+  it('resolves AWS session token aliases through the vault and redacts the token', async () => {
+    const vault = await createVault({ backend: 'memory', env: {
+      AWS_ACCESS_KEY_ID: 'fixture-access', AWS_SECRET_ACCESS_KEY: 'fixture-secret', AWS_SESSION_TOKEN: 'fixture-session',
+    } })
+    const s3 = await createS3Storage(vault, { bucket: 'assets', region: 'us-east-1' })
+    expect(new URL(await s3!.publicUrl(SHA, 'png')).searchParams.get('X-Amz-Security-Token')).toBe('fixture-session')
+    expect(vault.redactor.redact('fixture-session')).not.toContain('fixture-session')
   })
 
   describe('native AWS region resolution', () => {
@@ -77,10 +91,11 @@ describe('createS3Storage', () => {
       if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server!.close(() => resolve())) }
       server = undefined
     })
-    async function fixture(handler: Parameters<typeof createServer>[0], maxBytes = 16, timeoutMs = 100) {
+    async function fixture(handler: Parameters<typeof createServer>[0], maxBytes = 16, timeoutMs = 100, sessionToken?: string) {
       server = createServer(handler)
       await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))
       return storage({
+        ...(sessionToken ? { sessionToken } : {}),
         endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
         fetchPolicy: { allowHosts: [], allowPrivateHosts: true, maxBytes, timeoutMs },
       })
@@ -125,6 +140,24 @@ describe('createS3Storage', () => {
       expect(createHmac('sha256', key).update(toSign).digest('hex')).toBe(signature)
       expect(payloadHash).toBe(createHash('sha256').update(body).digest('hex'))
     }
+
+    it('sends and signs temporary credentials through the actual guarded HTTP transport', async () => {
+      let observed = false
+      const s = await fixture((req, res) => {
+        const chunks: Buffer[] = []
+        req.on('data', chunk => chunks.push(chunk))
+        req.on('end', () => {
+          try {
+            expect(req.headers['x-amz-security-token']).toBe('fixture-session')
+            expect(req.headers.authorization).toContain('x-amz-security-token')
+            verifySigV4(req, Buffer.concat(chunks)); observed = true
+          } catch (error) { res.statusCode = 403; res.end(String(error)); return }
+          res.end()
+        })
+      }, 16, 5000, 'fixture-session')
+      await s.put(hash, bytes, { mime: 'application/octet-stream', ext: 'bin' })
+      expect(observed).toBe(true)
+    })
 
     it('uploads more than 2 MB through the real SDK with Fetch-valid, SigV4-verified headers', async () => {
       const large = Buffer.alloc(3 * 1024 * 1024 + 17, 0x5a)

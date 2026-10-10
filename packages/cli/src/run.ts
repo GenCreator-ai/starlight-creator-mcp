@@ -166,13 +166,17 @@ async function init(b: CliBrand, args: string[]): Promise<number> {
   const templates = b.initTemplates ?? path.join(STARTER_PACK, 'init')
   const target = path.resolve(dir)
   const workspaceHome = resolveInside(target, '.creator-mcp')
+  const workspaceAssets = resolveInside(target, 'assets')
   // Refuse a linked or non-directory state path before any write could follow it outside the workspace.
-  try {
-    if (!(await lstat(workspaceHome)).isDirectory()) {
-      process.stderr.write(`refusing to initialise: ${workspaceHome} must be a real directory, not a link or file\n`)
-      return 1
-    }
-  } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err }
+  for (const directory of [workspaceHome, workspaceAssets]) {
+    try {
+      const existing = await lstat(directory)
+      if (existing.isSymbolicLink() || !existing.isDirectory()) {
+        process.stderr.write(`refusing to initialise: ${directory} must be a real directory, not a link or file\n`)
+        return 1
+      }
+    } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err }
+  }
   await mkdir(target, { recursive: true })
   let n = 0
   const walk = async (rel: string) => {
@@ -197,8 +201,8 @@ async function init(b: CliBrand, args: string[]): Promise<number> {
     }
   }
   await walk('')
-  const workspaceAssets = resolveInside(target, 'assets')
   await mkdir(workspaceAssets, { recursive: true })
+  await assertRealInside(target, workspaceAssets)
   await mkdir(workspaceHome, { recursive: true, mode: 0o700 })
   const workspaceConfig = await assertRealInside(target, resolveInside(target, '.creator-mcp/config.json'))
   try { await writeFile(workspaceConfig, JSON.stringify({ storage: { assetsDir: workspaceAssets } }, null, 2) + '\n', { flag: 'wx', mode: 0o600 }) }

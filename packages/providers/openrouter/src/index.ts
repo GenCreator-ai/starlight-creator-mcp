@@ -14,8 +14,8 @@ function tasksFor(m: ORModel): Task[] {
   if (outMods.includes('text')) { tasks.add('chat'); if (inMods.includes('image')) tasks.add('vision') }
   if (outMods.includes('image')) { tasks.add('t2i'); if (inMods.includes('image')) tasks.add('i2i') }
   if (outMods.includes('video')) { tasks.add('t2v'); if (inMods.includes('image')) tasks.add('i2v') }
-  if (outMods.includes('audio')) tasks.add('tts')
-  if (inMods.includes('audio') && outMods.includes('text')) tasks.add('stt')
+  // Advertise only tasks implemented by submit/text; audio modalities alone
+  // do not establish a working speech generation or transcription adapter.
   return [...tasks]
 }
 
@@ -49,7 +49,7 @@ export function createOpenRouterProvider(opts: OpenRouterProviderOptions): Provi
   return {
     id: 'openrouter',
     allowHosts: [OPENROUTER_HOST, host],
-    capabilities: () => ['chat', 'vision', 't2i', 'i2i', 't2v', 'i2v', 'stt'],
+    capabilities: () => ['chat', 'vision', 't2i', 'i2i', 't2v', 'i2v'],
     async isConfigured() { return !!(await opts.vault.resolve(SECRET_NAMES.openrouter)) },
     async listModels() {
       const data = await json<{ data: ORModel[] }>(`${base}/api/v1/models`, { method: 'GET' })

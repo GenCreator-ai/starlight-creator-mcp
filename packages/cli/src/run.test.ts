@@ -53,6 +53,17 @@ describe('stable CLI initialization and doctor', () => {
     expect(await runCli({ brand: 'fixture', version: '0.1.0' }, ['init', dir])).toBe(1)
     expect(await readdir(dir)).toEqual(['.creator-mcp'])
   })
+  it('rejects a linked asset root before copying templates or writing configuration', async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'creator-init-assets-link-'))
+    const workspace = path.join(dir, 'workspace'), outside = path.join(dir, 'outside')
+    await mkdir(workspace); await mkdir(outside)
+    await symlink(outside, path.join(workspace, 'assets'), process.platform === 'win32' ? 'junction' : 'dir')
+    const errors = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    expect(await runCli({ brand: 'fixture', version: '0.1.0' }, ['init', workspace])).toBe(1)
+    expect(errors.mock.calls.flat().join('')).toContain('must be a real directory')
+    expect(await readdir(outside)).toEqual([])
+    expect(await readdir(workspace)).toEqual(['assets'])
+  })
   it('doctor fails on explicitly configured S3 with missing credentials', async () => {
     dir = await mkdtemp(path.join(tmpdir(), 'creator-doctor-'))
     vi.stubEnv('CREATOR_MCP_HOME', dir)

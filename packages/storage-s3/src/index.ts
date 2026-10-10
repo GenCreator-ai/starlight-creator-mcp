@@ -13,6 +13,7 @@ export interface S3StorageOptions {
   forcePathStyle?: boolean
   accessKeyId: string
   secretAccessKey: string
+  sessionToken?: string
   presignTtlSeconds?: number
   fetchPolicy?: FetchPolicy
 }
@@ -37,7 +38,8 @@ export class S3Storage implements StorageConnector {
       ...(o.region ? { region: o.region } : o.endpoint ? { region: 'auto' } : {}),
       ...(o.endpoint ? { endpoint: o.endpoint } : {}),
       forcePathStyle: o.forcePathStyle ?? true,
-      credentials: { accessKeyId: o.accessKeyId, secretAccessKey: o.secretAccessKey },
+      credentials: { accessKeyId: o.accessKeyId, secretAccessKey: o.secretAccessKey,
+        ...(o.sessionToken ? { sessionToken: o.sessionToken } : {}) },
       maxAttempts: 1,
       // Fetch rejects Expect: 100-continue; Expect is never part of the SigV4 signature.
       expectContinueHeader: false,
@@ -196,6 +198,7 @@ export async function createS3Storage(vault: Vault, cfg: S3Config | undefined, f
   if (!cfg?.bucket) return null
   const accessKeyId = await vault.resolve(SECRET_NAMES.s3AccessKeyId)
   const secretAccessKey = await vault.resolve(SECRET_NAMES.s3SecretAccessKey)
+  const sessionToken = await vault.resolve(SECRET_NAMES.s3SessionToken)
   if (!accessKeyId || !secretAccessKey) throw new Error('S3 bucket configured but S3 credentials are missing; run creator-mcp setup --storage')
-  return new S3Storage({ ...cfg, accessKeyId, secretAccessKey, fetchPolicy })
+  return new S3Storage({ ...cfg, accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}), fetchPolicy })
 }

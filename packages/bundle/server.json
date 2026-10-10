@@ -11,9 +11,10 @@
       "version": "0.1.1",
       "transport": { "type": "stdio" },
       "environmentVariables": [
-        { "name": "OPENROUTER_API_KEY", "description": "OpenRouter key (text, images, video, transcription). Optional if stored via `starlight-creator-mcp setup`.", "isRequired": false, "isSecret": true, "format": "string" },
+        { "name": "OPENROUTER_API_KEY", "description": "OpenRouter key (text, images, video). Optional if stored via `starlight-creator-mcp setup`.", "isRequired": false, "isSecret": true, "format": "string" },
         { "name": "MUAPI_KEY", "description": "MuAPI key for the 226-model aggregated catalog.", "isRequired": false, "isSecret": true, "format": "string" },
         { "name": "GEMINI_API_KEY", "description": "Gemini key used as the vision judge.", "isRequired": false, "isSecret": true, "format": "string" },
+        { "name": "ELEVENLABS_API_KEY", "description": "ElevenLabs key for speech generation, music and sound effects. Optional if stored via `starlight-creator-mcp setup`.", "isRequired": false, "isSecret": true, "format": "string" },
         { "name": "CREATOR_PACKS", "description": "Path-delimited list of pack directories to load (defaults to the bundled starter pack).", "isRequired": false, "isSecret": false, "format": "string" }
       ]
     }
