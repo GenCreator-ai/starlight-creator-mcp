@@ -56,6 +56,27 @@ try {
   writeFileSync(join(workspace, '.mcp.json'), existing)
   run([bundleCli, 'init', workspace, 'Second init'])
   if (readFileSync(join(workspace, '.mcp.json'), 'utf8') !== existing) throw new Error('Init overwrote an existing client configuration')
+  check = 'storage-boundary'
+  writeFileSync(join(consumer, 'storage.mjs'), `
+import assert from 'node:assert/strict';
+import { mkdir, symlink, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { LocalStorage, assertRealInside, SandboxError } from '@starlight-intelligence/creator-core';
+const root=path.resolve('storage-fixture'); const outside=path.resolve('outside-fixture');
+await mkdir(root); await mkdir(outside);
+await symlink(outside,path.join(root,'aa'),process.platform==='win32'?'junction':'dir');
+const sha='a'.repeat(64);const storage=new LocalStorage(root);
+await assert.rejects(storage.put(sha,Buffer.from('fixture'),{mime:'image/png',ext:'png'}),SandboxError);
+await assert.rejects(storage.writeSidecar(sha,{fixture:true}),SandboxError);
+await assert.rejects(readFile(path.join(outside,sha+'.png')),error=>error.code==='ENOENT');
+await assert.rejects(readFile(path.join(outside,sha+'.provenance.json')),error=>error.code==='ENOENT');
+await writeFile(path.join(outside,sha+'.png'),'external fixture');
+assert.equal(await storage.get(sha,'png'),null);assert.equal(await storage.exists(sha,'png'),false);
+await assert.rejects(assertRealInside(root,path.join(root,'aa','missing','asset.png')),SandboxError);
+const valid='b'.repeat(64);await storage.put(valid,Buffer.from('valid'),{mime:'image/png',ext:'png'});
+assert.equal(Buffer.from(await storage.get(valid,'png')).toString(),'valid');
+`)
+  run(['storage.mjs'])
   check = 'protocol'
   writeFileSync(join(consumer, 'protocol.mjs'), `
 import assert from 'node:assert/strict';
@@ -79,7 +100,7 @@ try {
 `)
   run(['protocol.mjs'])
   const evidence = { schemaVersion: 1, sourceSha, manifestSha256: digest(receiptBytes), status: 'passed',
-    checks: ['all-ten-artifact-install', 'strict-public-declarations', 'installed-setup-identity', 'doctor-without-provider-keys', 'bundled-starter-discovery', 'installed-init-launch-and-isolation', 'init-existing-config-preserved', 'official-stdio-tool-discovery', 'unapproved-publication-denied'] }
+    checks: ['all-ten-artifact-install', 'strict-public-declarations', 'installed-setup-identity', 'doctor-without-provider-keys', 'bundled-starter-discovery', 'installed-init-launch-and-isolation', 'init-existing-config-preserved', 'installed-storage-link-boundary', 'official-stdio-tool-discovery', 'unapproved-publication-denied'] }
   writeFileSync(join(releaseDir, 'consumer.json'), JSON.stringify(evidence, null, 2) + '\n')
   console.log(JSON.stringify(evidence, null, 2))
 } catch {

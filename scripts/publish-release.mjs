@@ -60,7 +60,7 @@ export async function publishRelease(root = resolve(dirname(fileURLToPath(import
   validateReceipt(receipt, files, sourceSha)
   const consumer = JSON.parse(readFileSync(join(directory, 'consumer.json')))
   if (consumer.status !== 'passed' || consumer.sourceSha !== sourceSha || consumer.manifestSha256 !== digest(receiptBytes)
-    || !['all-ten-artifact-install', 'strict-public-declarations', 'installed-init-launch-and-isolation', 'init-existing-config-preserved', 'official-stdio-tool-discovery', 'unapproved-publication-denied'].every(name => consumer.checks?.includes(name))) throw new Error('Installed-consumer evidence mismatch')
+    || !['all-ten-artifact-install', 'strict-public-declarations', 'installed-init-launch-and-isolation', 'init-existing-config-preserved', 'installed-storage-link-boundary', 'official-stdio-tool-discovery', 'unapproved-publication-denied'].every(name => consumer.checks?.includes(name))) throw new Error('Installed-consumer evidence mismatch')
   const npmCli = process.env.NPM_CLI_PATH
   if (!npmCli || !isAbsolute(npmCli) || basename(npmCli) !== 'npm-cli.js' || !existsSync(npmCli)) throw new Error('Pinned npm CLI required')
   const pending = []
