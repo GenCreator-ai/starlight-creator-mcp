@@ -47,7 +47,8 @@ async function assertResolvesPublic(host: string): Promise<void> {
     if (isPrivateHost(host)) throw new FetchGuardError(`refusing private address ${host}`, 'private_host')
     return
   }
-  const addrs = await lookup(host, { all: true }).catch(() => [])
+  const addrs = await lookup(host, { all: true }).catch(() => { throw new FetchGuardError('hostname resolution failed', 'host_not_allowed') })
+  if (!addrs.length) throw new FetchGuardError('hostname has no resolved addresses', 'host_not_allowed')
   for (const a of addrs) if (isPrivateHost(a.address)) throw new FetchGuardError(`${host} resolves to private address ${a.address}`, 'private_host')
 }
 
@@ -71,22 +72,42 @@ export async function guardedFetch(input: string | URL, init: RequestInit & { po
   const timeout = setTimeout(() => controller.abort(), policy.timeoutMs ?? 60_000)
   const outerSignal = rest.signal
   const abort = () => controller.abort()
+  let bodyOwnsDeadline = false
+  let abortBody: () => void = () => {}
+  const cleanup = () => {
+    clearTimeout(timeout)
+    outerSignal?.removeEventListener('abort', abort)
+    controller.signal.removeEventListener('abort', abortBody)
+  }
+  const withinDeadline = async <T>(operation: () => Promise<T>): Promise<T> => {
+    controller.signal.throwIfAborted()
+    let rejectAbort: () => void = () => {}
+    const cancelled = new Promise<never>((_, reject) => {
+      rejectAbort = () => reject(new FetchGuardError('request cancelled or timed out', 'timeout'))
+      controller.signal.addEventListener('abort', rejectAbort, { once: true })
+    })
+    try { return await Promise.race([Promise.resolve().then(operation), cancelled]) }
+    finally { controller.signal.removeEventListener('abort', rejectAbort) }
+  }
   outerSignal?.addEventListener('abort', abort, { once: true })
   if (outerSignal?.aborted) abort()
   try {
     for (let redirects = 0; ; redirects++) {
       controller.signal.throwIfAborted()
-      await assertUrlAllowed(url, policy)
+      await withinDeadline(() => assertUrlAllowed(url, policy))
       controller.signal.throwIfAborted()
       const res = await fetch(url, { ...request, signal: controller.signal, redirect: 'manual' })
       if ([301, 302, 303, 307, 308].includes(res.status) && res.headers.has('location')) {
-        await res.body?.cancel()
+        await withinDeadline(async () => { await res.body?.cancel() })
         if (redirects >= 20) throw new FetchGuardError('redirect limit exceeded', 'redirect_blocked')
         const next = new URL(res.headers.get('location')!, url)
         if (next.username || next.password || (url.protocol === 'https:' && next.protocol !== 'https:')) {
           throw new FetchGuardError('credential-bearing or downgraded redirect blocked', 'redirect_blocked')
         }
-        await assertUrlAllowed(next, policy).catch(() => { throw new FetchGuardError('redirect destination blocked', 'redirect_blocked') })
+        await withinDeadline(() => assertUrlAllowed(next, policy)).catch(err => {
+          if (controller.signal.aborted) throw err
+          throw new FetchGuardError('redirect destination blocked', 'redirect_blocked')
+        })
         const method = (request.method ?? 'GET').toUpperCase()
         if ((res.status === 303 && method !== 'GET' && method !== 'HEAD') || ([301, 302].includes(res.status) && method === 'POST')) {
           request = { ...request, method: 'GET', body: undefined }
@@ -104,17 +125,39 @@ export async function guardedFetch(input: string | URL, init: RequestInit & { po
       }
       const len = Number(res.headers.get('content-length') ?? 0)
       if (policy.maxBytes && len > policy.maxBytes) {
-        await res.body?.cancel()
+        void res.body?.cancel().catch(() => {})
         throw new FetchGuardError(`response ${len} bytes exceeds limit ${policy.maxBytes}`, 'too_large')
       }
-      return res
+      if (!res.body) return res
+      let bytes = 0
+      const bounded = new TransformStream<Uint8Array, Uint8Array>({
+        start(destination) {
+          abortBody = () => {
+            destination.error(new FetchGuardError('response body cancelled or timed out', 'timeout'))
+            cleanup()
+          }
+          controller.signal.addEventListener('abort', abortBody, { once: true })
+          if (controller.signal.aborted) abortBody()
+        },
+        transform(chunk, destination) {
+          bytes += chunk.byteLength
+          if (policy.maxBytes !== undefined && bytes > policy.maxBytes) throw new FetchGuardError('response body exceeds limit', 'too_large')
+          destination.enqueue(chunk)
+        },
+        flush() { cleanup() },
+      })
+      // Keep the deadline alive through json/text/arrayBuffer and streamed reads.
+      void res.body.pipeTo(bounded.writable, { signal: controller.signal }).then(cleanup, cleanup)
+      bodyOwnsDeadline = true
+      const response = new Response(bounded.readable, { status: res.status, statusText: res.statusText, headers: res.headers })
+      Object.defineProperties(response, { url: { value: res.url }, redirected: { value: res.redirected }, type: { value: res.type } })
+      return response
     }
   } catch (err) {
     if ((err as Error).name === 'AbortError') throw new FetchGuardError(`fetch ${url.host} timed out`, 'timeout')
     throw err
   } finally {
-    clearTimeout(timeout)
-    outerSignal?.removeEventListener('abort', abort)
+    if (!bodyOwnsDeadline) cleanup()
   }
 }
 
