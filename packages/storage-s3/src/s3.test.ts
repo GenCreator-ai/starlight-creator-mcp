@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createS3Storage, S3Storage } from './index.js'
 import { configSchema, createVault } from '@starlight-intelligence/creator-core'
 import { createServer, type Server } from 'node:http'
-import { createHash } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
+import type { IncomingMessage } from 'node:http'
 
 const SHA = 'a'.repeat(64)
 
@@ -76,12 +77,12 @@ describe('createS3Storage', () => {
       if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server!.close(() => resolve())) }
       server = undefined
     })
-    async function fixture(handler: Parameters<typeof createServer>[0], maxBytes = 16) {
+    async function fixture(handler: Parameters<typeof createServer>[0], maxBytes = 16, timeoutMs = 100) {
       server = createServer(handler)
       await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))
       return storage({
         endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
-        fetchPolicy: { allowHosts: [], allowPrivateHosts: true, maxBytes, timeoutMs: 100 },
+        fetchPolicy: { allowHosts: [], allowPrivateHosts: true, maxBytes, timeoutMs },
       })
     }
     const bytes = Buffer.from('asset fixture')
@@ -101,6 +102,77 @@ describe('createS3Storage', () => {
       await s.put(hash, bytes, { mime: 'application/octet-stream', ext: 'bin' })
       expect(await s.get(hash, 'bin')).toEqual(bytes)
       await expect(s.put(SHA, bytes, { mime: 'application/octet-stream', ext: 'bin' })).rejects.toThrow('checksum mismatch')
+    })
+
+    // Independent SigV4 verification of what actually arrived on the wire.
+    function verifySigV4(req: IncomingMessage, body: Buffer): void {
+      const auth = /^AWS4-HMAC-SHA256 Credential=([^/]+)\/(\d{8})\/([^/]+)\/s3\/aws4_request, SignedHeaders=([^,]+), Signature=([a-f0-9]{64})$/.exec(req.headers.authorization ?? '')
+      expect(auth).not.toBeNull()
+      const [, accessKey, date, region, signedHeaders, signature] = auth!
+      expect(accessKey).toBe('fixture-access')
+      const [rawPath, rawQuery = ''] = req.url!.split('?')
+      const encode = (v: string) => encodeURIComponent(v).replace(/[!'()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+      const query = rawQuery ? rawQuery.split('&').map(pair => pair.split('=').map(v => encode(decodeURIComponent(v.replace(/\+/g, ' ')))))
+        .map(([k, v = '']) => `${k}=${v}`).sort().join('&') : ''
+      const names = signedHeaders!.split(';')
+      const headers = names.map(name => `${name}:${String(req.headers[name] ?? '').trim().replace(/\s+/g, ' ')}\n`).join('')
+      const payloadHash = String(req.headers['x-amz-content-sha256'])
+      const canonical = [req.method, rawPath, query, headers, signedHeaders, payloadHash].join('\n')
+      const scope = `${date}/${region}/s3/aws4_request`
+      const toSign = ['AWS4-HMAC-SHA256', req.headers['x-amz-date'], scope, createHash('sha256').update(canonical).digest('hex')].join('\n')
+      let key: Buffer = createHmac('sha256', 'AWS4fixture-secret').update(date!).digest()
+      for (const part of [region!, 's3', 'aws4_request']) key = createHmac('sha256', key).update(part).digest()
+      expect(createHmac('sha256', key).update(toSign).digest('hex')).toBe(signature)
+      expect(payloadHash).toBe(createHash('sha256').update(body).digest('hex'))
+    }
+
+    it('uploads more than 2 MB through the real SDK with Fetch-valid, SigV4-verified headers', async () => {
+      const large = Buffer.alloc(3 * 1024 * 1024 + 17, 0x5a)
+      const largeHash = createHash('sha256').update(large).digest('hex')
+      const received: Array<{ headers: IncomingMessage['headers']; length: number }> = []
+      const s = await fixture((req, res) => {
+        const chunks: Buffer[] = []
+        req.on('data', chunk => chunks.push(chunk))
+        req.on('end', () => {
+          const body = Buffer.concat(chunks)
+          try {
+            verifySigV4(req, body)
+            received.push({ headers: req.headers, length: body.byteLength })
+          } catch (error) { res.statusCode = 403; res.end(String(error)); return }
+          res.end()
+        })
+      }, 8 * 1024 * 1024, 10_000)
+      expect(await s.put(largeHash, large, { mime: 'application/octet-stream', ext: 'bin' })).toEqual({ uri: `s3://assets/${s.key(largeHash, 'bin')}`, connector: 's3' })
+      expect(received).toHaveLength(1)
+      const [{ headers, length }] = received as [typeof received[0]]
+      expect(length).toBe(large.byteLength)
+      expect(headers['content-length']).toBe(String(large.byteLength))
+      expect(headers.expect).toBeUndefined()
+      expect(headers.authorization).toContain('content-length;')
+      expect(headers['x-amz-checksum-sha256']).toBe(Buffer.from(largeHash, 'hex').toString('base64'))
+      expect(headers['x-amz-meta-sha256']).toBe(largeHash)
+    })
+
+    it('doctor fails a missing bucket instead of treating a 404 probe as reachable', async () => {
+      const requests: string[] = []
+      const s = await fixture((req, res) => { requests.push(`${req.method} ${req.url!.split('?')[0]}`); res.statusCode = 404; res.end() })
+      expect(await s.stat()).toMatchObject({ ok: false, detail: expect.stringContaining('bucket not found') })
+      expect(requests).toEqual(['HEAD /assets/'])
+    })
+
+    it('doctor accepts an existing bucket whose probe object is absent', async () => {
+      const requests: string[] = []
+      const s = await fixture((req, res) => {
+        requests.push(`${req.method} ${req.url!.split('?')[0]}`)
+        res.statusCode = req.url!.split('?')[0] === '/assets/' ? 200 : 404; res.end()
+      })
+      expect(await s.stat()).toMatchObject({ ok: true, detail: expect.stringContaining('reachable') })
+      expect(requests).toEqual(['HEAD /assets/', `HEAD /assets/${s.key('0'.repeat(64), 'probe')}`])
+    })
+
+    it('doctor keeps a denied object probe indeterminate after the bucket exists', async () => {
+      const s = await fixture((req, res) => { res.statusCode = req.url!.split('?')[0] === '/assets/' ? 200 : 403; res.end() })
+      expect(await s.stat()).toMatchObject({ ok: false, detail: expect.stringContaining('access indeterminate') })
     })
 
     it('does not equate least-privilege 403 with rejected credentials or send write probes', async () => {

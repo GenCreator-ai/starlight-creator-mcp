@@ -29,6 +29,25 @@ jobs:
       - run: pnpm lint
       - run: npx vitest run packages/packs-spec packages/core
       - run: pnpm run test:release
+  storage-runtime:
+    # Real S3 SDK transport through guardedFetch (>2 MB SigV4 upload) on every advertised Node major.
+    needs: typecheck-unit
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version: '${{ matrix.node }}' }
+      - run: npm install --global pnpm@11.5.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: npx vitest run packages/storage-s3 packages/core/src/net packages/core/src/error-bodies.test.ts
   e2e:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     needs: typecheck-unit

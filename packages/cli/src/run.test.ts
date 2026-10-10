@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { clientLaunch, runCli } from './run.js'
@@ -33,6 +33,25 @@ describe('stable CLI initialization and doctor', () => {
     expect(() => clientLaunch({ brand: 'custom-wrapper', version: '2.3.4' })).toThrow('must declare npmPackage')
     expect(clientLaunch({ brand: 'custom-wrapper', version: '2.3.4', npmPackage: '@fixture/custom-wrapper' }).args)
       .toEqual(['--yes', '@fixture/custom-wrapper@2.3.4', 'stdio'])
+  })
+  it('rejects a linked workspace state directory before writing anything', async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'creator-init-link-'))
+    const workspace = path.join(dir, 'workspace'), outside = path.join(dir, 'outside')
+    await mkdir(workspace); await mkdir(outside)
+    await symlink(outside, path.join(workspace, '.creator-mcp'), process.platform === 'win32' ? 'junction' : 'dir')
+    const errors = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    expect(await runCli({ brand: 'fixture', version: '0.1.0' }, ['init', workspace])).toBe(1)
+    expect(errors.mock.calls.flat().join('')).toContain('must be a real directory')
+    expect(await readdir(outside)).toEqual([])
+    expect(await readdir(workspace)).toEqual(['.creator-mcp'])
+  })
+  it('rejects a file in place of the workspace state directory', async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'creator-init-file-'))
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(path.join(dir, '.creator-mcp'), 'not a directory')
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    expect(await runCli({ brand: 'fixture', version: '0.1.0' }, ['init', dir])).toBe(1)
+    expect(await readdir(dir)).toEqual(['.creator-mcp'])
   })
   it('doctor fails on explicitly configured S3 with missing credentials', async () => {
     dir = await mkdtemp(path.join(tmpdir(), 'creator-doctor-'))

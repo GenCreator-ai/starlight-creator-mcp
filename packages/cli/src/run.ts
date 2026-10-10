@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process'
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import {
-  CreatorContext, SECRET_NAMES, creatorHome, createVault, loadConfig, saveConfig, resolveInside, sqliteAvailable, type Provider, type Vault,
+  CreatorContext, SECRET_NAMES, assertRealInside, creatorHome, createVault, loadConfig, saveConfig, resolveInside, sqliteAvailable, type Provider, type Vault,
 } from '@starlight-intelligence/creator-core'
 import { validatePackDir } from '@starlight-intelligence/creator-packs-spec'
 import { createCreatorServer, defaultProviders, defaultStorageConnectors, packsFromEnv, serveCreatorHttp, STARTER_PACK, type AnyToolDef, type ToolCuration } from '@starlight-intelligence/creator-server'
@@ -165,6 +165,14 @@ async function init(b: CliBrand, args: string[]): Promise<number> {
   const name = args[1] ?? path.basename(path.resolve(dir))
   const templates = b.initTemplates ?? path.join(STARTER_PACK, 'init')
   const target = path.resolve(dir)
+  const workspaceHome = resolveInside(target, '.creator-mcp')
+  // Refuse a linked or non-directory state path before any write could follow it outside the workspace.
+  try {
+    if (!(await lstat(workspaceHome)).isDirectory()) {
+      process.stderr.write(`refusing to initialise: ${workspaceHome} must be a real directory, not a link or file\n`)
+      return 1
+    }
+  } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err }
   await mkdir(target, { recursive: true })
   let n = 0
   const walk = async (rel: string) => {
@@ -191,9 +199,8 @@ async function init(b: CliBrand, args: string[]): Promise<number> {
   await walk('')
   const workspaceAssets = resolveInside(target, 'assets')
   await mkdir(workspaceAssets, { recursive: true })
-  const workspaceHome = resolveInside(target, '.creator-mcp')
   await mkdir(workspaceHome, { recursive: true, mode: 0o700 })
-  const workspaceConfig = resolveInside(target, '.creator-mcp/config.json')
+  const workspaceConfig = await assertRealInside(target, resolveInside(target, '.creator-mcp/config.json'))
   try { await writeFile(workspaceConfig, JSON.stringify({ storage: { assetsDir: workspaceAssets } }, null, 2) + '\n', { flag: 'wx', mode: 0o600 }) }
   catch (err) { if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err }
   process.stdout.write(`initialised ${name} at ${target} (${n} files)\n`)

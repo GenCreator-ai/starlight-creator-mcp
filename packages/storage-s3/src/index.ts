@@ -1,4 +1,4 @@
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { GetObjectCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { createHash } from 'node:crypto'
 import { Readable } from 'node:stream'
@@ -131,6 +131,17 @@ export class S3Storage implements StorageConnector {
   }
 
   async stat(): Promise<{ ok: boolean; detail: string }> {
+    try {
+      // HEAD responses carry no error body, so a missing bucket and a missing probe key both look like 404.
+      // HeadBucket is read-only (s3:ListBucket) and proves the bucket exists before the object probe.
+      await this.client.send(new HeadBucketCommand({ Bucket: this.o.bucket }))
+    } catch (err) {
+      const e = err as { name?: string; $metadata?: { httpStatusCode?: number } }
+      const status = e.$metadata?.httpStatusCode
+      if (status === 404 || e.name === 'NotFound' || e.name === 'NoSuchBucket') return { ok: false, detail: `${this.o.bucket}: bucket not found${this.o.endpoint ? ` at ${this.o.endpoint}` : ''}` }
+      if (status === 403) return { ok: false, detail: `${this.o.bucket}: access indeterminate (403); HeadBucket requires s3:ListBucket. Verify bucket permissions and credentials; no write probe was performed.` }
+      return { ok: false, detail: `${this.o.bucket}: ${e.name ?? (err as Error).message}` }
+    }
     try {
       // A missing-key HEAD cannot distinguish denied access from missing ListBucket permission.
       await this.client.send(new HeadObjectCommand({ Bucket: this.o.bucket, Key: this.key('0'.repeat(64), 'probe') }))

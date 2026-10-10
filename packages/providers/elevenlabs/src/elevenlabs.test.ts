@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { createVault, type GenerationRequest } from '@starlight-intelligence/creator-core'
 import { createElevenLabsProvider } from './index.js'
@@ -6,6 +6,7 @@ import { createElevenLabsProvider } from './index.js'
 describe('ElevenLabs HTTP contract', () => {
   let server: Server | undefined
   afterEach(async () => {
+    vi.unstubAllEnvs()
     if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server!.close(() => resolve())) }
     server = undefined
   })
@@ -93,6 +94,21 @@ describe('ElevenLabs HTTP contract', () => {
     await expect(provider.listModels()).rejects.toMatchObject({ code: 'timeout' })
     stall = false
     await expect(provider.submit(request('tts'))).rejects.toMatchObject({ code: 'too_large' })
+  })
+  it.each(['voices', 'models'])('releases unread %s error bodies', async route => {
+    vi.stubEnv('ELEVENLABS_VOICE_ID', '')
+    let open = 0
+    server = createServer((req, res) => {
+      open++
+      req.socket.once('close', () => { open-- })
+      res.writeHead(401, { 'content-type': 'application/json' }); res.write('{"detail":')
+    })
+    await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))
+    const vault = await createVault({ backend: 'memory' })
+    await vault.set('ELEVENLABS_API_KEY', 'fixture-only')
+    const provider = createElevenLabsProvider({ vault, baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, fetchPolicy: { allowHosts: [], allowPrivateHosts: true } })
+    await expect(route === 'voices' ? provider.submit(request('tts')) : provider.listModels()).rejects.toMatchObject({ status: 401 })
+    await vi.waitFor(() => { expect(open).toBe(0) }, { timeout: 1000 })
   })
   it('surfaces network failures during lookup', async () => {
     const vault = await createVault({ backend: 'memory' })

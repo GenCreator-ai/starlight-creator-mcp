@@ -33,7 +33,7 @@ After the repaired version is published and checked, its npm command is
 
 Providers in this tree: **OpenRouter** (text, images, async video, transcription), **MuAPI** (226-model image/video catalog), **ElevenLabs** (speech, sound effects, music), **Google Gemini** (vision judge). Each activates only when its key is present; `doctor` runs with none of them.
 
-Storage: **local** (default, always on), **S3-compatible** (AWS S3, Cloudflare R2, MinIO — `setup --storage`), **rclone** (any remote it supports). Publishing media needs a connector that can produce a public URL, so local-only installs can generate and score but not attach images to posts.
+Storage: **local** (default, always on), **S3-compatible** (AWS S3, Cloudflare R2, MinIO — `setup --storage`), **rclone** (any remote it supports). S3 endpoints, including AWS, must be listed explicitly in `policy.allowHosts`; a configured bucket fails closed if the optional connector was omitted (`--omit=optional`) or its credentials are missing. Publishing media needs a connector that can produce a public URL, so local-only installs can generate and score but not attach images to posts.
 
 ## Tools (16)
 
