@@ -41,9 +41,6 @@ importers:
       '@starlight-intelligence/creator-server':
         specifier: workspace:*
         version: link:../server
-      '@starlight-intelligence/creator-storage-s3':
-        specifier: workspace:*
-        version: link:../storage-s3
 
   packages/cli:
     dependencies:

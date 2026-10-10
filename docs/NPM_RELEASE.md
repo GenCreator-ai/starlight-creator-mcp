@@ -47,8 +47,8 @@ Consumer verification installs all ten actual tarballs together outside workspac
 resolution, with install scripts disabled. It checks strict public declarations,
 the installed CLI's setup/doctor/packs, official MCP stdio discovery of 16 tools,
 launching an initialized workspace with its own state and asset directories, preserving an existing client configuration, and rejection of an actually prepared unsigned publication. Provider credentials
-are omitted from its environment. These checks passed locally along with 52 existing
-tests and 8 release safety tests. Local working-tree receipts are marked dirty and
+are omitted from its environment. Historical counts are not current evidence; use
+the test output and source-bound receipts for the chosen revision. Local working-tree receipts are marked dirty and
 cannot authorize publication. Hosted results must identify their own exact revision.
 
 MCP server/client are pinned 2.3.1 and the Node adapter 2.1.1. Hono, js-yaml and
@@ -83,8 +83,8 @@ executable malformed-manifest regression covers that recovery boundary.
 trailing members, incomplete padding and ambiguous path/numeric fields accepted
 by the archive parser. These are now rejected before inspecting or publishing
 content. Directory payloads are denied and directories count toward the500-member
-limit. Compressed2MB/decoded8MB budgets are retained. All ten release safety tests
-pass; all ten previously packed archives still parse. The earlier clean receipt,
+limit. Compressed2MB/decoded8MB budgets are retained. The previously packed archives
+still parsed at that revision. The earlier clean receipt,
 review packet and hosted success at1ce433d retain their revision boundaries and
 must be refreshed for this change. Local build admission is held at7222MB free/
 8192required; no new local build or consumer run is claimed. GitHub npm-production
@@ -116,3 +116,15 @@ remain unverified. Keep cloud/public support claims withheld until those gates p
 Sources: [pnpm workspace packing](https://pnpm.io/workspaces),
 [official MCP SDK v2](https://ts.sdk.modelcontextprotocol.io/v2/),
 [npm trusted publishers](https://docs.npmjs.com/trusted-publishers/).
+
+## Review remediation validation
+
+The remediation uses Node 24.21.0 and pinned pnpm 11.5.0 with frozen installation.
+Build, typecheck, lint, unit, existing e2e and release-contract suites were executed;
+their command output, rather than historical totals above, is the evidence.
+All ten tarballs passed archive/manifest/graph verification and checksum-verified
+Gitleaks 8.30.1 scanning. Installed-consumer verification was attempted but stopped
+at npm install with `SELF_SIGNED_CERT_IN_CHAIN` in the hosted isolated environment.
+No consumer success, clean publication receipt, live provider acceptance, or release
+is claimed. The consumer now also requires a local-only `--omit=optional` install
+without S3/AWS and doctor acceptance; publication requires this new evidence.

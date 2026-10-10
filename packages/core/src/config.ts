@@ -8,7 +8,7 @@ export const configSchema = z.object({
   storage: z.object({
     connector: z.enum(['local', 's3', 'rclone']).default('local'),
     assetsDir: z.string().optional(),
-    s3: z.object({ bucket: z.string(), endpoint: z.string().optional(), region: z.string().default('auto'), prefix: z.string().default(''), publicDomain: z.string().optional(), forcePathStyle: z.boolean().default(true) }).optional(),
+    s3: z.object({ bucket: z.string(), endpoint: z.string().optional(), region: z.string().optional(), prefix: z.string().default(''), publicDomain: z.string().optional(), forcePathStyle: z.boolean().default(true) }).optional(),
     rclone: z.object({ remote: z.string(), prefix: z.string().default('') }).optional(),
     autoSync: z.array(z.string()).default([]),
   }).default({ connector: 'local', autoSync: [] }),

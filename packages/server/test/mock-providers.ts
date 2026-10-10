@@ -4,7 +4,7 @@ export const MP3_STUB = Buffer.concat([Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00
 
 export const PNG_1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
 
-export interface MockState { muapiCalls: Array<{ endpoint: string; body: unknown }>; orCalls: Array<{ path: string; body: unknown }>; elevenCalls: Array<{ path: string; body: unknown }>; judgeScores: number[]; videoPolls: number }
+export interface MockState { muapiCalls: Array<{ endpoint: string; body: unknown }>; orCalls: Array<{ path: string; body: unknown }>; elevenCalls: Array<{ path: string; body: unknown; format: string | null }>; judgeScores: number[]; videoPolls: number }
 
 export async function startMockProviders(): Promise<{ server: Server; url: string; state: MockState }> {
   const state: MockState = { muapiCalls: [], orCalls: [], elevenCalls: [], judgeScores: [], videoPolls: 0 }
@@ -36,8 +36,9 @@ export async function startMockProviders(): Promise<{ server: Server; url: strin
       // --- ElevenLabs ---
       if (url.pathname === '/v1/models') return json(200, [{ model_id: 'eleven_multilingual_v2', name: 'Multilingual v2', can_do_text_to_speech: true }])
       if (url.pathname === '/v1/voices') return json(200, { voices: [{ voice_id: 'voice_mock_1', name: 'Mock Voice' }] })
-      if (url.pathname.startsWith('/v1/text-to-speech/') || url.pathname === '/v1/sound-generation' || url.pathname === '/v1/music/compose') {
-        state.elevenCalls.push({ path: url.pathname, body })
+      if (url.pathname.startsWith('/v1/text-to-speech/') || url.pathname === '/v1/sound-generation' || url.pathname === '/v1/music') {
+        state.elevenCalls.push({ path: url.pathname, body, format: url.searchParams.get('output_format') })
+        if (url.searchParams.get('output_format') !== 'mp3_44100_128' || body.output_format) return json(422, { error: 'format must be a supported query parameter' })
         res.setHeader('content-type', 'audio/mpeg')
         res.end(MP3_STUB)
         return

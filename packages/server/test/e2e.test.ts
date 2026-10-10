@@ -165,7 +165,8 @@ describe('creator-mcp over stdio', () => {
 
     const music = structured<{ status: string }>(await client.callTool({ name: 'creator_generate_audio', arguments: { kind: 'music', prompt: 'slow ambient strings', duration_s: 12 } }))
     expect(music.status).toBe('completed')
-    expect(mock.state.elevenCalls.at(-1)?.path).toBe('/v1/music/compose')
+    expect(mock.state.elevenCalls.at(-1)?.path).toBe('/v1/music')
+    expect(mock.state.elevenCalls.at(-1)?.format).toBe('mp3_44100_128')
     // seconds are converted to the API's milliseconds, clamped to its 3s-600s range
     expect((mock.state.elevenCalls.at(-1)?.body as { music_length_ms?: number }).music_length_ms).toBe(12_000)
   })

@@ -1,7 +1,7 @@
 {
   "name": "@starlight-intelligence/creator-mcp",
   "version": "0.1.1",
-  "description": "Sovereign creator MCP: BYOK image/video/audio generation, taste scoring, provenance ledger and human-gated publishing on your own machine. The substrate brand packs build on.",
+  "description": "Sovereign creator MCP: BYOK image/video/audio generation, taste scoring, provenance ledger and client-confirmed publishing on your own machine. The substrate brand packs build on.",
   "license": "MIT",
   "publishConfig": { "access": "public" },
   "type": "module",
@@ -45,7 +45,6 @@
     "@starlight-intelligence/creator-cli": "workspace:*",
     "@starlight-intelligence/creator-server": "workspace:*",
     "@starlight-intelligence/creator-core": "workspace:*",
-    "@starlight-intelligence/creator-packs-spec": "workspace:*",
-    "@starlight-intelligence/creator-storage-s3": "workspace:*"
+    "@starlight-intelligence/creator-packs-spec": "workspace:*"
   }
 }
