@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -47,7 +47,7 @@ describe('real filesystem sandbox', () => {
     expect(Buffer.from((await storage.get(sha, 'png'))!).toString()).toBe('fixture')
     expect(await storage.readSidecar(sha)).toEqual({ fixture: true })
     await symlink(path.join(root, 'bb'), path.join(root, 'inside'), process.platform === 'win32' ? 'junction' : 'dir')
-    expect(await assertRealInside(root, path.join(root, 'inside', 'new.png'))).toBe(path.join(root, 'bb', 'new.png'))
+    expect(await assertRealInside(root, path.join(root, 'inside', 'new.png'))).toBe(path.join(await realpath(path.join(root, 'bb')), 'new.png'))
   })
   it('fails closed when an existing component is not a directory', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'creator-sandbox-'))
