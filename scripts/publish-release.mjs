@@ -29,8 +29,12 @@ export function createNpmRuntime(root, npmCli, env) {
 
 export async function registryIntegrity(row, fetchImpl = fetch) {
   const response = await fetchImpl(`https://registry.npmjs.org/${encodeURIComponent(row.name)}/${encodeURIComponent(row.version)}`, { redirect: 'error', signal: AbortSignal.timeout(20_000) })
-  if (response.status === 404) return null
-  if (!response.ok || !response.body) throw new Error('Registry preflight unavailable')
+  if (response.status === 404 || !response.ok || !response.body) {
+    // Release the connection held by unread error bodies before returning or failing.
+    await response.body?.cancel().catch(() => {})
+    if (response.status === 404) return null
+    throw new Error('Registry preflight unavailable')
+  }
   const reader = response.body.getReader(), chunks = []
   let size = 0
   try {

@@ -1,4 +1,4 @@
-import { guardedFetch, type FetchPolicy } from '../net/fetch-guard.js'
+import { discardBody, guardedFetch, type FetchPolicy } from '../net/fetch-guard.js'
 import type { Channel, PublishAdapter, PublishOutcome } from './adapter.js'
 import type { ManifestPost, PublicationManifest } from './manifest.js'
 
@@ -30,8 +30,14 @@ export class PostizAdapter implements PublishAdapter {
 
   async listChannels(): Promise<Channel[]> {
     let res = await guardedFetch(`${this.base}/integrations`, { headers: this.headers(false), policy: this.policy })
-    if (!res.ok) res = await guardedFetch(`${this.base}/channels`, { headers: this.headers(false), policy: this.policy })
-    if (!res.ok) throw new Error(`Postiz integrations request failed: ${res.status}`)
+    if (!res.ok) {
+      await discardBody(res)
+      res = await guardedFetch(`${this.base}/channels`, { headers: this.headers(false), policy: this.policy })
+    }
+    if (!res.ok) {
+      await discardBody(res)
+      throw new Error(`Postiz integrations request failed: ${res.status}`)
+    }
     const data = (await res.json()) as PostizIntegration[] | { integrations?: PostizIntegration[]; data?: PostizIntegration[] }
     const list = Array.isArray(data) ? data : data.integrations ?? data.data ?? []
     return list.filter(i => !i.disabled).map(i => ({ id: String(i.id), name: i.name ?? i.profileName ?? i.username ?? 'channel', platform: i.identifier ?? i.type ?? i.provider ?? 'unknown', raw: i as unknown as Record<string, unknown> }))
@@ -39,7 +45,7 @@ export class PostizAdapter implements PublishAdapter {
 
   async uploadFromUrl(url: string): Promise<{ id: string; path: string } | null> {
     const res = await guardedFetch(`${this.base}/upload-from-url`, { method: 'POST', headers: this.headers(), body: JSON.stringify({ url }), policy: this.policy })
-    if (!res.ok) return null
+    if (!res.ok) { await discardBody(res); return null }
     const data = (await res.json()) as { id?: string; path?: string }
     return data.id && data.path ? { id: data.id, path: data.path } : null
   }
@@ -64,7 +70,7 @@ export class PostizAdapter implements PublishAdapter {
 
   async fetchMetrics(nativeId: string): Promise<Record<string, number> | null> {
     const res = await guardedFetch(`${this.base}/posts/${encodeURIComponent(nativeId)}`, { headers: this.headers(false), policy: this.policy })
-    if (!res.ok) return null
+    if (!res.ok) { await discardBody(res); return null }
     const data = (await res.json()) as Record<string, unknown>
     const out: Record<string, number> = {}
     for (const [k, v] of Object.entries(data)) if (typeof v === 'number') out[k] = v

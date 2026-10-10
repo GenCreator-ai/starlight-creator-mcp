@@ -1,5 +1,5 @@
 import {
-  guardedFetch, ProviderError, readBodyLimited, SECRET_NAMES, sniffMime,
+  discardBody, guardedFetch, ProviderError, readBodyLimited, SECRET_NAMES, sniffMime,
   type FetchPolicy, type GenerationRequest, type ModelRecord, type Provider, type ProviderJob, type Vault,
 } from '@starlight-intelligence/creator-core'
 
@@ -50,7 +50,10 @@ export function createElevenLabsProvider(opts: ElevenLabsProviderOptions): Provi
     if (configured) return configured
     if (cachedVoice) return cachedVoice
     const res = await guardedFetch(`${base}/v1/voices`, { headers: await headers(false), policy })
-    if (!res.ok) throw new ProviderError(`elevenlabs voices ${res.status}; pass voice explicitly or set ELEVENLABS_VOICE_ID`, 'elevenlabs', res.status >= 500, res.status)
+    if (!res.ok) {
+      await discardBody(res)
+      throw new ProviderError(`elevenlabs voices ${res.status}; pass voice explicitly or set ELEVENLABS_VOICE_ID`, 'elevenlabs', res.status >= 500, res.status)
+    }
     const data = (await res.json()) as { voices?: ElevenVoice[] }
     const first = data.voices?.[0]?.voice_id
     if (!first) throw new ProviderError('your ElevenLabs account has no voices; add one or pass voice explicitly', 'elevenlabs')
@@ -88,7 +91,7 @@ export function createElevenLabsProvider(opts: ElevenLabsProviderOptions): Provi
       const models: ModelRecord[] = [...SYNTHETIC]
       const res = await guardedFetch(`${base}/v1/models`, { headers: await headers(false), policy })
       if (!res.ok) {
-        await res.body?.cancel()
+        await discardBody(res)
         throw new ProviderError(`elevenlabs models ${res.status}`, 'elevenlabs', res.status >= 500 || res.status === 429, res.status)
       }
       const list: unknown = await res.json()

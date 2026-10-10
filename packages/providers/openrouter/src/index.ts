@@ -1,5 +1,5 @@
 import {
-  guardedFetch, ProviderError, SECRET_NAMES, type FetchPolicy, type GenerationRequest, type ModelRecord, type Provider, type ProviderJob, type Task, type TextRequest, type TextResult, type Vault,
+  discardBody, guardedFetch, ProviderError, SECRET_NAMES, type FetchPolicy, type GenerationRequest, type ModelRecord, type Provider, type ProviderJob, type Task, type TextRequest, type TextResult, type Vault,
 } from '@starlight-intelligence/creator-core'
 
 export const OPENROUTER_HOST = 'openrouter.ai'
@@ -81,7 +81,10 @@ export function createOpenRouterProvider(opts: OpenRouterProviderOptions): Provi
       const outputs = []
       for (const url of urls) {
         const res = await guardedFetch(url, { headers: { Authorization: auth.Authorization }, policy: { ...policy, maxBytes: 512 * 1024 * 1024 } })
-        if (!res.ok) throw new ProviderError(`openrouter video download ${res.status}`, 'openrouter', res.status >= 500, res.status)
+        if (!res.ok) {
+          await discardBody(res)
+          throw new ProviderError(`openrouter video download ${res.status}`, 'openrouter', res.status >= 500, res.status)
+        }
         outputs.push({ bytes: new Uint8Array(await res.arrayBuffer()), mime: res.headers.get('content-type')?.split(';')[0] ?? 'video/mp4', kind: 'video' as const })
       }
       return { providerJobId, status: 'completed', result: { outputs, ...(data.usage?.cost !== undefined ? { costUsd: data.usage.cost } : {}), ...(data.usage?.is_byok !== undefined ? { isByok: data.usage.is_byok } : {}) } }

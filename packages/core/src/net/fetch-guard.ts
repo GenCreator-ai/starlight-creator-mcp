@@ -186,6 +186,11 @@ export async function guardedFetch(input: string | URL, init: RequestInit & { po
   }
 }
 
+/** A guarded body owns its deadline timer and connection pool until read or cancelled; release it on every early return. */
+export async function discardBody(res: Response): Promise<void> {
+  try { await res.body?.cancel() } catch { /* Already consumed, locked, or errored bodies have released their resources. */ }
+}
+
 export async function readBodyLimited(res: Response, maxBytes: number): Promise<Uint8Array> {
   if (!res.body) return new Uint8Array()
   const reader = res.body.getReader()

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { guardedFetch, isPrivateHost } from './fetch-guard.js'
+import { discardBody, guardedFetch, isPrivateHost } from './fetch-guard.js'
 import { lookup } from 'node:dns/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -162,6 +162,32 @@ describe('guarded redirect requests', () => {
       const response = await guardedFetch(url, { policy: { ...policy, timeoutMs: 150 } })
       expect(response.status).toBe(200)
       await expect(response.json()).rejects.toMatchObject({ code: 'timeout' })
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    }
+  })
+
+  it('releases the socket and deadline of an unread error body when discarded', async () => {
+    let open = 0
+    const server = createServer((request, response) => {
+      open++
+      request.socket.once('close', () => { open-- })
+      response.writeHead(503, { 'content-type': 'application/json' })
+      response.write('{"error":')
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const timers = () => process.getActiveResourcesInfo().filter(resource => resource === 'Timeout').length
+    try {
+      const before = timers()
+      const response = await guardedFetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/fixture`, { policy: { ...policy, timeoutMs: 60_000 } })
+      expect(response.status).toBe(503)
+      expect(open).toBe(1)
+      expect(timers()).toBeGreaterThan(before)
+      await discardBody(response)
+      await vi.waitFor(() => { expect(open).toBe(0) }, { timeout: 1000 })
+      expect(timers()).toBe(before)
+      await discardBody(response)
     } finally {
       server.closeAllConnections()
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))

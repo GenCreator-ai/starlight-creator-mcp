@@ -181,6 +181,18 @@ test('registry recovery distinguishes missing versions from errors and rejects i
   assert.equal(request.options.redirect, 'error')
 })
 
+test('registry 404 and failure responses release their unread bodies', async () => {
+  const row = { name: targets[0].name, version: '0.1.0' }
+  for (const status of [404, 403, 503]) {
+    let cancelled = 0
+    const body = new ReadableStream({ pull: () => new Promise(() => {}), cancel: () => { cancelled++ } })
+    const outcome = registryIntegrity(row, async () => new Response(body, { status }))
+    if (status === 404) assert.equal(await outcome, null)
+    else await assert.rejects(outcome, /unavailable/)
+    assert.equal(cancelled, 1, `status ${status}`)
+  }
+})
+
 test('a failed consumer rerun invalidates previous success before malformed manifest parsing', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'creator-consumer-denial-'))
   try {

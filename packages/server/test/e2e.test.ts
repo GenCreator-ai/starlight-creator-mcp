@@ -4,7 +4,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createServer } from 'node:http'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { startMockProviders, type MockState } from './mock-providers.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -181,5 +182,24 @@ describe('creator-mcp over stdio', () => {
     const res = await client.callTool({ name: 'creator_asset_sync', arguments: { import_url: 'https://example.com/x.png' } })
     expect(res.isError).toBe(true)
     expect(String((res.content[0] as { text: string }).text)).toMatch(/allowlist/)
+  })
+
+  it('import_url failures release the unread error body and its connection', async () => {
+    const live = new Set<unknown>()
+    const origin = createServer((req, res) => {
+      live.add(req.socket)
+      req.socket.once('close', () => { live.delete(req.socket) })
+      res.writeHead(404, { 'content-type': 'text/plain' }); res.write('missing')
+    })
+    await new Promise<void>(resolve => origin.listen(0, '127.0.0.1', resolve))
+    try {
+      const res = await client.callTool({ name: 'creator_asset_sync', arguments: { import_url: `http://127.0.0.1:${(origin.address() as { port: number }).port}/x.png` } })
+      expect(res.isError).toBe(true)
+      expect(String((res.content[0] as { text: string }).text)).toContain('fetch returned 404')
+      await vi.waitFor(() => { expect(live.size).toBe(0) }, { timeout: 2000 })
+    } finally {
+      origin.closeAllConnections()
+      await new Promise<void>(resolve => origin.close(() => resolve()))
+    }
   })
 })
