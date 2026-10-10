@@ -137,3 +137,10 @@ separate OS temporary directories. A nested local-only consumer could otherwise
 resolve the omitted S3 package from its full consumer parent or the repository.
 Fresh CI and review apply to the integrated candidate, not the worker's earlier
 tests or certificate-limited install attempt.
+
+The integrated Windows run exposed a SQLite handle left open when context
+creation failed during configured storage initialization. The factory now closes
+its own ledger on failure and preserves caller-injected ledgers; doctor closes
+any successfully created context even when later diagnostics fail. Windows file
+removal and injected-ledger ownership fixtures cover recovery. The failed Windows
+run is retained as evidence; it does not count as release acceptance.

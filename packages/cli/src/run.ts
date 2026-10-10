@@ -139,8 +139,9 @@ async function doctor(b: CliBrand, serverOpts: Parameters<typeof createCreatorSe
   for (const s of SECRETS) lines.push(`  ${(await vault.resolve(s.name)) ? 'set    ' : 'missing'} ${s.name}`)
   lines.push(`ledger: ${sqliteAvailable() ? 'node:sqlite' : 'jsonl fallback (node:sqlite unavailable)'} at ${creatorHome()}`)
   for (const dir of serverOpts.packs) { const v = await validatePackDir(dir); lines.push(`pack: ${v.ok ? 'ok  ' : 'FAIL'} ${v.manifest?.id ?? '?'} ${dir}`); if (!v.ok) ok = false; for (const i of v.issues.filter(i => i.level === 'error')) lines.push(`  ${i.path}: ${i.message}`) }
+  let ctx: CreatorContext | undefined
   try {
-    const ctx = await CreatorContext.create({ packs: serverOpts.packs, providers: serverOpts.providers, storageConnectors: defaultStorageConnectors, ...(serverOpts.packsByBenefit ? { packsByBenefit: serverOpts.packsByBenefit } : {}) })
+    ctx = await CreatorContext.create({ packs: serverOpts.packs, providers: serverOpts.providers, storageConnectors: defaultStorageConnectors, ...(serverOpts.packsByBenefit ? { packsByBenefit: serverOpts.packsByBenefit } : {}) })
     for (const p of ctx.providers.all()) {
       const configured = await p.isConfigured()
       let detail = configured ? 'configured' : 'no key'
@@ -152,8 +153,8 @@ async function doctor(b: CliBrand, serverOpts: Parameters<typeof createCreatorSe
     const rubrics = [...ctx.merged.rubrics.keys()]
     lines.push(`packs loaded: ${ctx.merged.packs.map(p => `${p.id}@${p.version}`).join(', ')} | rubrics: ${rubrics.join(', ') || 'none'} | styles: ${ctx.merged.styles.size} | prompts: ${ctx.merged.prompts.size}`)
     lines.push(`signer fingerprint: ${await ctx.signer.fingerprint()}`)
-    await ctx.close()
   } catch (err) { lines.push(`context: FAIL ${(err as Error).message}`); ok = false }
+  finally { await ctx?.close() }
   process.stdout.write(`${lines.join('\n')}\n${ok ? 'OK' : 'PROBLEMS FOUND'}\n`)
   return ok ? 0 : 1
 }
