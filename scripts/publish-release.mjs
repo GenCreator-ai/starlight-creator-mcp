@@ -1,13 +1,30 @@
 import { execFileSync } from 'node:child_process'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, isAbsolute, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateReceipt, digest } from './release-contract.mjs'
 
 export function assertPublishingContext(env, sourceSha) {
   if (env.GITHUB_ACTIONS !== 'true' || env.GITHUB_REPOSITORY !== 'frankxai/starlight-creator-mcp' || env.GITHUB_REF !== 'refs/heads/main'
+    || env.GITHUB_EVENT_NAME !== 'workflow_dispatch'
+    || env.GITHUB_WORKFLOW_REF !== 'frankxai/starlight-creator-mcp/.github/workflows/npm-release.yml@refs/heads/main'
     || !/^[a-f0-9]{40}$/.test(sourceSha) || env.GITHUB_SHA !== sourceSha || !env.ACTIONS_ID_TOKEN_REQUEST_URL || !env.ACTIONS_ID_TOKEN_REQUEST_TOKEN
     || env.NODE_AUTH_TOKEN || env.NPM_TOKEN) throw new Error('Publication requires the main-only GitHub OIDC environment without npm tokens')
+}
+
+// Reuse the SIS release boundary: a private package root prevents parent npmrc discovery.
+export function createNpmRuntime(root, npmCli, env) {
+  if (!npmCli || !isAbsolute(npmCli) || basename(npmCli) !== 'npm-cli.js' || !existsSync(npmCli)) throw new Error('Pinned npm CLI required')
+  const cwd = mkdtempSync(join(root, 'artifacts', 'npm-oidc-'))
+  writeFileSync(join(cwd, 'package.json'), JSON.stringify({ name: 'creator-oidc-release-runtime', private: true }))
+  for (const file of ['.npmrc', 'user.npmrc', 'global.npmrc']) writeFileSync(join(cwd, file), '', { mode: 0o600 })
+  const allowed = ['PATH', 'Path', 'SystemRoot', 'TEMP', 'TMP', 'HOME', 'USERPROFILE', 'CI',
+    'GITHUB_ACTIONS', 'GITHUB_REPOSITORY', 'GITHUB_REPOSITORY_ID', 'GITHUB_REPOSITORY_OWNER', 'GITHUB_REPOSITORY_OWNER_ID',
+    'GITHUB_SERVER_URL', 'GITHUB_SHA', 'GITHUB_WORKFLOW_REF', 'GITHUB_WORKFLOW_SHA', 'GITHUB_WORKFLOW',
+    'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_EVENT_NAME', 'GITHUB_ACTOR', 'GITHUB_ACTOR_ID', 'GITHUB_REF', 'RUNNER_ENVIRONMENT',
+    'ACTIONS_ID_TOKEN_REQUEST_URL', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN']
+  return { command: process.execPath, prefix: [npmCli, '--userconfig=' + join(cwd, 'user.npmrc'), '--globalconfig=' + join(cwd, 'global.npmrc')],
+    options: { cwd, timeout: 120_000, env: Object.fromEntries(allowed.filter(key => typeof env[key] === 'string').map(key => [key, env[key]])) } }
 }
 
 export async function registryIntegrity(row, fetchImpl = fetch) {
@@ -46,7 +63,6 @@ export async function publishRelease(root = resolve(dirname(fileURLToPath(import
     || !['all-ten-artifact-install', 'strict-public-declarations', 'installed-init-launch-and-isolation', 'init-existing-config-preserved', 'official-stdio-tool-discovery', 'unapproved-publication-denied'].every(name => consumer.checks?.includes(name))) throw new Error('Installed-consumer evidence mismatch')
   const npmCli = process.env.NPM_CLI_PATH
   if (!npmCli || !isAbsolute(npmCli) || basename(npmCli) !== 'npm-cli.js' || !existsSync(npmCli)) throw new Error('Pinned npm CLI required')
-  const publish = publishImpl ?? (row => execFileSync(process.execPath, [npmCli, 'publish', join(directory, row.file), '--access=public', '--provenance', '--ignore-scripts'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000 }))
   const pending = []
   // Preflight every existing version before the first irreversible action.
   for (const row of receipt.packages) {
@@ -54,6 +70,10 @@ export async function publishRelease(root = resolve(dirname(fileURLToPath(import
     if (existing && existing !== row.integrity) throw new Error('Published version conflicts with reviewed bytes')
     if (!existing) pending.push(row)
   }
+  const runtime = pending.length && !publishImpl ? createNpmRuntime(root, npmCli, process.env) : null
+  const publish = publishImpl ?? (row => execFileSync(runtime.command, [...runtime.prefix, 'publish', join(directory, row.file),
+    '--access=public', '--provenance', '--ignore-scripts', '--registry=https://registry.npmjs.org'],
+    { ...runtime.options, stdio: ['ignore', 'pipe', 'pipe'] }))
   for (const row of pending) {
     if (digest(readFileSync(join(directory, row.file))) !== row.sha256) throw new Error('Artifact changed after preflight')
     try { await publish(row) } catch { throw new Error('Publication outcome is uncertain; reconcile registry before retrying') }

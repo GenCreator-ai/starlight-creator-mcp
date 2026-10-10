@@ -65,8 +65,5 @@ jobs:
           path: artifacts/npm-release/
       - name: Publish verified bytes through npm OIDC
         run: |
-          echo '' > "$RUNNER_TEMP/empty-npmrc"
-          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/empty-npmrc"
-          export NPM_CONFIG_GLOBALCONFIG="$RUNNER_TEMP/empty-npmrc"
           export NPM_CLI_PATH="$(npm root --global)/npm/bin/npm-cli.js"
           node scripts/publish-release.mjs

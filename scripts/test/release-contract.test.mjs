@@ -1,9 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { gzipSync, gunzipSync } from 'node:zlib'
-import { resolve } from 'node:path'
+import { resolve, join, dirname } from 'node:path'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { targets, readTar, validateEntries, validateGraph, validateReceipt, digest, integrity, pnpmInvocation } from '../release-contract.mjs'
-import { assertPublishingContext, registryIntegrity } from '../publish-release.mjs'
+import { assertPublishingContext, registryIntegrity, createNpmRuntime } from '../publish-release.mjs'
 
 function archive(entries, type = '0') {
   const blocks = []
@@ -119,11 +122,48 @@ test('pnpm launchers support native and JavaScript paths without accepting shell
 test('publication rejects local contexts, other repositories, branches and token fallback', () => {
   const sha = 'a'.repeat(40)
   const env = { GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'frankxai/starlight-creator-mcp', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: sha,
+    GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_WORKFLOW_REF: 'frankxai/starlight-creator-mcp/.github/workflows/npm-release.yml@refs/heads/main',
     ACTIONS_ID_TOKEN_REQUEST_URL: 'https://fixture.actions.githubusercontent.com/token', ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'fixture-request' }
   assertPublishingContext(env, sha)
   for (const patch of [{ GITHUB_ACTIONS: 'false' }, { GITHUB_REPOSITORY: 'untrusted/repo' }, { GITHUB_REF: 'refs/heads/feature' },
     { GITHUB_SHA: 'b'.repeat(40) }, { NODE_AUTH_TOKEN: 'fixture' }, { NPM_TOKEN: 'fixture' }, { ACTIONS_ID_TOKEN_REQUEST_TOKEN: '' }]) {
     assert.throws(() => assertPublishingContext({ ...env, ...patch }, sha), /main-only/)
+  }
+  for (const patch of [{ GITHUB_EVENT_NAME: 'push' }, { GITHUB_WORKFLOW_REF: 'frankxai/starlight-creator-mcp/.github/workflows/ci.yml@refs/heads/main' }]) {
+    assert.throws(() => assertPublishingContext({ ...env, ...patch }, sha), /main-only/)
+  }
+})
+
+test('publisher isolates project/user/global npm configs and sensitive environment while preserving provenance metadata', () => {
+  const root = mkdtempSync(join(tmpdir(), 'creator-npm-config-'))
+  try {
+    mkdirSync(join(root, 'artifacts'))
+    writeFileSync(join(root, 'package.json'), '{"name":"fixture-parent","private":true}')
+    writeFileSync(join(root, '.npmrc'), 'registry=https://fixture.invalid/\n')
+    const empty = join(root, 'empty.npmrc')
+    const emptyGlobal = join(root, 'empty-global.npmrc')
+    writeFileSync(empty, '')
+    writeFileSync(emptyGlobal, '')
+    const npmCli = process.env.NPM_CLI_PATH ?? join(dirname(process.execPath), process.platform === 'win32' ? 'node_modules' : '../lib/node_modules', 'npm/bin/npm-cli.js')
+    const platform = Object.fromEntries(['PATH', 'Path', 'SystemRoot', 'TEMP', 'TMP'].filter(key => process.env[key]).map(key => [key, process.env[key]]))
+    // Empty user/global configs alone leave the parent project config active.
+    const inherited = execFileSync(process.execPath, [npmCli, '--userconfig=' + empty, '--globalconfig=' + emptyGlobal, 'config', 'get', 'registry'],
+      { cwd: root, env: platform, encoding: 'utf8', timeout: 15_000 }).trim()
+    assert.equal(inherited, 'https://fixture.invalid/')
+    const provenance = { GITHUB_REPOSITORY_OWNER_ID: 'fixture-owner', GITHUB_REF: 'refs/heads/main', RUNNER_ENVIRONMENT: 'github-hosted',
+      ACTIONS_ID_TOKEN_REQUEST_URL: 'https://fixture.invalid/token', ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'fixture-request' }
+    const runtime = createNpmRuntime(root, npmCli, { ...platform, ...provenance, NODE_OPTIONS: '--require=fixture-must-not-load', NODE_PATH: root,
+      npm_config_registry: 'https://environment.invalid/', NPM_CONFIG_USERCONFIG: empty, NPM_TOKEN: 'fixture-token', NODE_AUTH_TOKEN: 'fixture-token',
+      GITHUB_TOKEN: 'fixture-token', OPENROUTER_API_KEY: 'fixture-provider' })
+    for (const [key, value] of Object.entries(provenance)) assert.equal(runtime.options.env[key], value)
+    for (const key of ['NODE_OPTIONS', 'NODE_PATH', 'npm_config_registry', 'NPM_CONFIG_USERCONFIG', 'NPM_TOKEN', 'NODE_AUTH_TOKEN', 'GITHUB_TOKEN', 'OPENROUTER_API_KEY']) {
+      assert.equal(runtime.options.env[key], undefined)
+    }
+    assert.equal(execFileSync(runtime.command, [...runtime.prefix, 'config', 'get', 'registry'],
+      { ...runtime.options, encoding: 'utf8' }).trim(), 'https://registry.npmjs.org/')
+  } finally {
+    assert.equal(dirname(resolve(root)), resolve(tmpdir()))
+    rmSync(root, { recursive: true, force: true })
   }
 })
 

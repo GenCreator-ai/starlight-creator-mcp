@@ -67,6 +67,15 @@ the same bytes with provenance and scripts disabled. Ambiguous failure stops;
 registry reconciliation precedes a retry. A multi-package release is not atomic.
 The old local --publish path is disabled. No npm token fallback is introduced.
 
+The publisher checks the exact manual main workflow as well as source identity.
+It launches npm from a private package root with empty project/user/global configs,
+an explicit public registry and an allowlisted environment. Inherited npm config,
+Node preload options and provider/GitHub tokens are omitted; OIDC and GitHub
+provenance metadata are retained. An offline regression shows that empty user/global
+configs alone still admit parent project configuration, while the isolated runtime
+uses the public registry. Signed npm trusted-publisher configuration remains the
+authorization boundary; workflow environment strings are checks against accidents.
+
 10 October follow-up: regression fixtures exposed partial terminators, hidden
 trailing members, incomplete padding and ambiguous path/numeric fields accepted
 by the archive parser. These are now rejected before inspecting or publishing
