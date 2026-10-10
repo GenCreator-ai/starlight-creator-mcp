@@ -26,7 +26,7 @@ function entries(pkg) {
     ['package/dist/index.d.ts', Buffer.from('export declare const fixture: boolean;')], ['package/LICENSE', Buffer.from('MIT fixture')], ['package/README.md', Buffer.from('fixture usage')],
   ])
   if (pkg.name.endsWith('/creator-server')) result.set('package/packs/starter/pack.json', Buffer.from('{}'))
-  if (pkg.name.endsWith('/creator-mcp')) result.set('package/server.json', Buffer.from(JSON.stringify({ version: pkg.version, packages: [{ identifier: pkg.name, version: pkg.version }] })))
+  if (pkg.name.endsWith('/creator-mcp')) result.set('package/server.json', Buffer.from(JSON.stringify({ description: 'Fixture creator server', version: pkg.version, packages: [{ identifier: pkg.name, version: pkg.version }] })))
   return result
 }
 const manifest = name => ({ name, version: '0.1.0', license: 'MIT', main: './dist/index.js', types: './dist/index.d.ts' })
@@ -84,6 +84,19 @@ test('packaging rejects state, test fixtures, absent license and stale MCP regis
   assert.throws(() => validateEntries(missingLicense, pkg), /license required/)
   const stale = entries(pkg); stale.set('package/server.json', Buffer.from('{"version":"9.0.0"}'))
   assert.throws(() => validateEntries(stale, pkg), /registration identity/)
+})
+
+test('MCP registration description respects the official 100-character limit', () => {
+  const pkg = manifest(targets[9].name)
+  const files = entries(pkg)
+  const registration = JSON.parse(files.get('package/server.json'))
+  registration.description = 'x'.repeat(100)
+  files.set('package/server.json', Buffer.from(JSON.stringify(registration)))
+  assert.equal(validateEntries(files, pkg).name, pkg.name)
+  for (const description of ['', 'x'.repeat(101), undefined]) {
+    files.set('package/server.json', Buffer.from(JSON.stringify({ ...registration, description })))
+    assert.throws(() => validateEntries(files, pkg), /registration description/)
+  }
 })
 
 test('all runtime and optional workspace dependencies must belong to the ordered version set', () => {

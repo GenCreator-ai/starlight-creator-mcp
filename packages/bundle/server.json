@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.frankxai/starlight-creator-mcp",
-  "description": "Sovereign creator MCP: BYOK image/video/audio generation, taste scoring, provenance ledger and client-confirmed publishing on your own machine.",
+  "description": "BYOK image, video and audio creation with taste scoring, provenance and confirmed publishing.",
   "repository": { "url": "https://github.com/frankxai/starlight-creator-mcp", "source": "github" },
   "version": "0.1.1",
   "packages": [

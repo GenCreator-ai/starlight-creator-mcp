@@ -1,8 +1,8 @@
 # @starlight-intelligence/creator-server
 
-MCP server factory for the creator substrate: 16 creator_* tools, pack resources and prompts.
+MCP server factory for the creator substrate: creator_* tools, pack resources and prompts.
 
-The MCP server factory. `createCreatorServer()` returns an `McpServer` (SDK v2, spec 2026-07-28) exposing 16 `creator_*` tools with input schemas, output schemas and annotations, plus pack resources, pack prompts and JSON composite tools.
+The MCP server factory. `createCreatorServer()` returns an `McpServer` (SDK v2, spec 2026-07-28) exposing 15 default `creator_*` tools with input schemas, output schemas and annotations, plus pack resources, pack prompts and JSON composite tools. `creator_transcribe` is added only when an injected provider implements `stt`; the default providers do not implement transcription.
 
 Brand wrappers call this with their own pack and a `tools` curation block to rename or hide tools; they never reimplement one.
 

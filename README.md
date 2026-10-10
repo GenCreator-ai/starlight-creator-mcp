@@ -31,13 +31,15 @@ After the repaired version is published and checked, its npm command is
 `npx --yes @starlight-intelligence/creator-mcp@0.1.1`. See
 [release verification and remaining gates](docs/NPM_RELEASE.md).
 
-Providers in this tree: **OpenRouter** (text, images, async video, transcription), **MuAPI** (226-model image/video catalog), **ElevenLabs** (speech, sound effects, music), **Google Gemini** (vision judge). Each activates only when its key is present; `doctor` runs with none of them.
+Providers in this tree: **OpenRouter** (text, images, async video), **MuAPI** (226-model image/video catalog), **ElevenLabs** (speech, sound effects, music), **Google Gemini** (vision judge). Each activates only when its key is present; `doctor` runs with none of them. These adapters do not implement transcription.
 
 Storage: **local** (default, always on), **S3-compatible** (AWS S3, Cloudflare R2, MinIO — `setup --storage`), **rclone** (any remote it supports). S3 endpoints, including AWS, must be listed explicitly in `policy.allowHosts`; a configured bucket fails closed if the optional connector was omitted (`--omit=optional`) or its credentials are missing. Publishing media needs a connector that can produce a public URL, so local-only installs can generate and score but not attach images to posts.
 
-## Tools (16)
+## Tools
 
-`creator_models` · `creator_generate_image` · `creator_generate_video` · `creator_generate_audio` · `creator_transcribe` · `creator_job_status` · `creator_score` · `creator_assets` · `creator_asset_sync` · `creator_pack_info` · `creator_publication_prepare` · `creator_publication_approve` · `creator_publish` · `creator_metrics_ingest` · `creator_metrics_query` · `creator_license_status`
+`creator_models` · `creator_generate_image` · `creator_generate_video` · `creator_generate_audio` · `creator_job_status` · `creator_score` · `creator_assets` · `creator_asset_sync` · `creator_pack_info` · `creator_publication_prepare` · `creator_publication_approve` · `creator_publish` · `creator_metrics_ingest` · `creator_metrics_query` · `creator_license_status`
+
+`creator_transcribe` is registered only when an injected provider implements the `stt` capability. It is absent with the default providers.
 
 Every tool has an input schema, an output schema (`structuredContent`) and annotations. Long jobs return a `job_id` within `wait_ms` (≤ 20 s) instead of blocking. Resources: `pack://<id>/manifest`, `pack://<id>/canon/<file>`, `pack://<id>/templates/<id>`, `pack://<id>/rubrics/<id>`, `creator://assets/<sha>`, `creator://jobs/<id>`. Pack prompts become MCP prompts.
 

@@ -88,6 +88,7 @@ export function validateEntries(entries, expected) {
   if (pkg.name.endsWith('/creator-mcp')) {
     const registration = JSON.parse(entries.get('package/server.json')?.toString() ?? 'null')
     if (registration?.version !== pkg.version || registration.packages?.length !== 1 || registration.packages[0].identifier !== pkg.name || registration.packages[0].version !== pkg.version) throw new Error('MCP registration identity mismatch')
+    if (typeof registration.description !== 'string' || [...registration.description].length < 1 || [...registration.description].length > 100) throw new Error('MCP registration description must contain 1 to 100 characters')
   }
   return pkg
 }

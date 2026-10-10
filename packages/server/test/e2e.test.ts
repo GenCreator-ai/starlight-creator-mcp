@@ -6,6 +6,8 @@ import { Client } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import { createServer } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { CreatorContext, JsonlLedger, configSchema, createVault, type Provider } from '@starlight-intelligence/creator-core'
+import { createCreatorServer } from '../src/create-server.js'
 import { startMockProviders, type MockState } from './mock-providers.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -47,13 +49,34 @@ afterAll(async () => {
 })
 
 describe('creator-mcp over stdio', () => {
-  it('lists the 16 substrate tools with output schemas and annotations', async () => {
+  it('lists supported substrate tools with output schemas and annotations, without unavailable transcription', async () => {
     const { tools } = await client.listTools()
     const names = tools.map(t => t.name).sort()
-    expect(names).toEqual(['creator_asset_sync', 'creator_assets', 'creator_generate_audio', 'creator_generate_image', 'creator_generate_video', 'creator_job_status', 'creator_license_status', 'creator_metrics_ingest', 'creator_metrics_query', 'creator_models', 'creator_pack_info', 'creator_publication_approve', 'creator_publication_prepare', 'creator_publish', 'creator_score', 'creator_transcribe'])
+    expect(names).toEqual(['creator_asset_sync', 'creator_assets', 'creator_generate_audio', 'creator_generate_image', 'creator_generate_video', 'creator_job_status', 'creator_license_status', 'creator_metrics_ingest', 'creator_metrics_query', 'creator_models', 'creator_pack_info', 'creator_publication_approve', 'creator_publication_prepare', 'creator_publish', 'creator_score'])
     for (const t of tools) { expect(t.outputSchema, t.name).toBeDefined(); expect(t.annotations, t.name).toBeDefined() }
     expect(tools.find(t => t.name === 'creator_models')?.annotations?.readOnlyHint).toBe(true)
     expect(tools.find(t => t.name === 'creator_generate_image')?.annotations?.readOnlyHint).toBe(false)
+  })
+
+  it('retains transcription for an injected provider that implements stt', async () => {
+    vi.stubEnv('CREATOR_MCP_HOME', home)
+    const ledger = new JsonlLedger(null)
+    const provider: Provider = {
+      id: 'fixture-stt', allowHosts: [], capabilities: () => ['stt'],
+      isConfigured: async () => true, listModels: async () => [],
+      submit: async () => { throw new Error('Fixture only checks discovery') },
+      poll: async () => { throw new Error('Fixture only checks discovery') },
+    }
+    let server: Awaited<ReturnType<typeof createCreatorServer>> | undefined
+    try {
+      const context = await CreatorContext.create({ config: configSchema.parse({}), vault: await createVault({ backend: 'memory' }), ledger,
+        packs: [], providers: () => [provider] })
+      server = await createCreatorServer({ name: 'fixture-stt', version: '0.0.0', packs: [], providers: () => [], context })
+      expect(server.toolNames).toContain('creator_transcribe')
+    } finally {
+      vi.unstubAllEnvs()
+      try { await server?.server.close() } finally { ledger.close() }
+    }
   })
 
   it('creator_models merges both providers and reports the pack default', async () => {

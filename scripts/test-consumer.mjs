@@ -102,7 +102,8 @@ const client = new Client({name:'installed-release-consumer',version:'0.0.0'});
 try {
  await client.connect(transport);
  const tools = await client.listTools();
- assert.equal(tools.tools.length,16);
+ assert.equal(tools.tools.length,15);
+ assert.equal(tools.tools.some(tool=>tool.name==='creator_transcribe'),false);
  assert.ok(tools.tools.some(t=>t.name==='creator_publication_prepare'));
  const info = await client.callTool({name:'creator_pack_info',arguments:{}});
  assert.notEqual(info.isError,true);

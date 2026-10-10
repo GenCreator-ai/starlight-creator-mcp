@@ -40,8 +40,9 @@ export async function createCreatorServer(opts: CreatorServerOptions): Promise<C
   const server = new McpServer({ name: opts.name, version: opts.version }, { instructions: opts.instructions ?? defaultInstructions(ctx) })
   const curation = opts.tools ?? {}
   const hidden = new Set(curation.hide ?? [])
-  const base = SUBSTRATE_TOOLS.filter(t => !hidden.has(t.name))
-  const composite = await loadCompositeTools(ctx, SUBSTRATE_TOOLS)
+  const supported = SUBSTRATE_TOOLS.filter(t => t.name !== transcribe.name || ctx.providers.forTask('stt').length > 0)
+  const base = supported.filter(t => !hidden.has(t.name))
+  const composite = await loadCompositeTools(ctx, supported)
   const all = [...base, ...(opts.brandTools ?? []), ...composite]
   const names: string[] = []
   for (const def of all) {
