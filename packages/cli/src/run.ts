@@ -7,7 +7,7 @@ import {
   CreatorContext, SECRET_NAMES, creatorHome, createVault, loadConfig, saveConfig, resolveInside, sqliteAvailable, type Provider, type Vault,
 } from '@starlight-intelligence/creator-core'
 import { validatePackDir } from '@starlight-intelligence/creator-packs-spec'
-import { createCreatorServer, defaultProviders, packsFromEnv, serveCreatorHttp, STARTER_PACK, type AnyToolDef, type ToolCuration } from '@starlight-intelligence/creator-server'
+import { createCreatorServer, defaultProviders, defaultStorageConnectors, packsFromEnv, serveCreatorHttp, STARTER_PACK, type AnyToolDef, type ToolCuration } from '@starlight-intelligence/creator-server'
 
 export interface CliBrand {
   brand: string
@@ -89,13 +89,13 @@ async function setup(b: CliBrand, args: string[]): Promise<number> {
   const vault = await createVault()
   if (has(args, '--print')) {
     const pkg = b.npmPackage ?? b.brand
-    const localBin = path.resolve(process.argv[1] ?? 'packages/bundle/dist/main.js')
+    const launch = clientLaunch(b)
     const name = b.brand.replace(/-mcp$/, '')
-    const config = JSON.stringify({ mcpServers: { [name]: { command: process.execPath, args: [localBin] } } }, null, 2)
+    const config = JSON.stringify({ mcpServers: { [name]: launch } }, null, 2)
     process.stdout.write(
-      `Claude Code (local, until npm publish exists):\n  claude mcp add ${name} -s user -- ${process.execPath} ${localBin}\n\n` +
+      `Claude Code:\n  claude mcp add ${name} -s user -- ${launch.command} ${launch.args.join(' ')}\n\n` +
       `Cursor / Antigravity / Codex (.mcp.json or settings):\n${config}\n\n` +
-      `Do not run \`npx -y ${pkg}\` until that package is on the npm registry.\n` +
+      `Version-pinned package invocation (requires this version on npm): \`npx --yes ${pkg}@${b.version} stdio\`\n` +
       `Keys are read from the OS keychain (${vault.backend}) or from env: ${SECRETS.map(s => s.name).join(', ')}\n`,
     )
     return 0
@@ -116,8 +116,10 @@ async function setup(b: CliBrand, args: string[]): Promise<number> {
     const bucket = (await rl.question('S3/R2 bucket name (blank to skip): ')).trim()
     if (bucket) {
       const endpoint = (await rl.question('S3 endpoint (R2: https://<account>.r2.cloudflarestorage.com): ')).trim()
+      const region = (await rl.question('Region (AWS: e.g. us-east-1; blank uses AWS SDK configuration; R2: auto): ')).trim()
       const publicDomain = (await rl.question('Public domain for objects (optional): ')).trim()
-      cfg.storage.s3 = { bucket, region: 'auto', prefix: '', forcePathStyle: true, ...(endpoint ? { endpoint } : {}), ...(publicDomain ? { publicDomain } : {}) }
+      cfg.storage.s3 = { bucket, prefix: '', forcePathStyle: true, ...(region ? { region } : {}), ...(endpoint ? { endpoint } : {}), ...(publicDomain ? { publicDomain } : {}) }
+      process.stdout.write('S3 outbound hosts must be explicitly listed in config policy.allowHosts; private endpoints remain blocked.\n')
       cfg.storage.connector = 'local'
       const ak = (await rl.question('S3 access key id: ')).trim(); if (ak) await vault.set(SECRET_NAMES.s3AccessKeyId, ak)
       const sk = (await rl.question('S3 secret access key: ')).trim(); if (sk) await vault.set(SECRET_NAMES.s3SecretAccessKey, sk)
@@ -138,14 +140,14 @@ async function doctor(b: CliBrand, serverOpts: Parameters<typeof createCreatorSe
   lines.push(`ledger: ${sqliteAvailable() ? 'node:sqlite' : 'jsonl fallback (node:sqlite unavailable)'} at ${creatorHome()}`)
   for (const dir of serverOpts.packs) { const v = await validatePackDir(dir); lines.push(`pack: ${v.ok ? 'ok  ' : 'FAIL'} ${v.manifest?.id ?? '?'} ${dir}`); if (!v.ok) ok = false; for (const i of v.issues.filter(i => i.level === 'error')) lines.push(`  ${i.path}: ${i.message}`) }
   try {
-    const ctx = await CreatorContext.create({ packs: serverOpts.packs, providers: serverOpts.providers, ...(serverOpts.packsByBenefit ? { packsByBenefit: serverOpts.packsByBenefit } : {}) })
+    const ctx = await CreatorContext.create({ packs: serverOpts.packs, providers: serverOpts.providers, storageConnectors: defaultStorageConnectors, ...(serverOpts.packsByBenefit ? { packsByBenefit: serverOpts.packsByBenefit } : {}) })
     for (const p of ctx.providers.all()) {
       const configured = await p.isConfigured()
       let detail = configured ? 'configured' : 'no key'
       if (configured) { try { detail = `${(await p.listModels()).length} models` } catch (err) { detail = `ERROR ${(err as Error).message}`; ok = false } }
       lines.push(`provider: ${p.id.padEnd(11)} ${detail}`)
     }
-    for (const [id, c] of ctx.connectors) { const s = await c.stat(); lines.push(`storage: ${id.padEnd(8)} ${s.ok ? 'ok' : 'FAIL'} ${s.detail}`) }
+    for (const [id, c] of ctx.connectors) { const s = await c.stat(); lines.push(`storage: ${id.padEnd(8)} ${s.ok ? 'ok' : 'FAIL'} ${s.detail}`); if (!s.ok) ok = false }
     for (const [id, a] of ctx.publishAdapters) { const s = await a.stat(); lines.push(`publish: ${id.padEnd(8)} ${s.ok ? 'ok' : 'FAIL'} ${s.detail}`) }
     const rubrics = [...ctx.merged.rubrics.keys()]
     lines.push(`packs loaded: ${ctx.merged.packs.map(p => `${p.id}@${p.version}`).join(', ')} | rubrics: ${rubrics.join(', ') || 'none'} | styles: ${ctx.merged.styles.size} | prompts: ${ctx.merged.prompts.size}`)
@@ -174,8 +176,7 @@ async function init(b: CliBrand, args: string[]): Promise<number> {
       if (r === '.mcp.json') {
         const settings = JSON.parse(body) as { mcpServers?: Record<string, unknown> }
         if (settings.mcpServers?.creator) settings.mcpServers.creator = {
-          command: process.execPath,
-          args: [path.resolve(process.argv[1] ?? 'packages/bundle/dist/main.js')],
+          ...clientLaunch(b),
           env: { CREATOR_MCP_HOME: resolveInside(target, '.creator-mcp') },
         }
         body = JSON.stringify(settings, null, 2) + '\n'
@@ -196,6 +197,14 @@ async function init(b: CliBrand, args: string[]): Promise<number> {
   catch (err) { if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err }
   process.stdout.write(`initialised ${name} at ${target} (${n} files)\n`)
   return 0
+}
+
+export function clientLaunch(b: CliBrand): { command: string; args: string[] } {
+  const entry = path.resolve(process.argv[1] ?? 'packages/bundle/dist/main.js')
+  if (/(?:^|[\\/])_npx[\\/]/.test(entry)) {
+    return { command: process.platform === 'win32' ? 'npx.cmd' : 'npx', args: ['--yes', `${b.npmPackage ?? '@starlight-intelligence/creator-cli'}@${b.version}`, 'stdio'] }
+  }
+  return { command: process.execPath, args: [entry] }
 }
 
 async function approve(b: CliBrand, serverOpts: Parameters<typeof createCreatorServer>[0], args: string[]): Promise<number> {

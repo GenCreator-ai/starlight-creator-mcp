@@ -30,6 +30,21 @@ const run = (args, timeout = 120_000) => execFileSync(process.execPath, args, { 
 let check = 'install'
 try {
   run([npmCli, 'install', '--ignore-scripts', '--no-audit', '--no-fund', '--fetch-retries=0', '--fetch-timeout=20000', '--registry=https://registry.npmjs.org'], 300_000)
+  check = 'optional-s3'
+  const localOnly = join(consumer, 'local-only')
+  mkdirSync(localOnly)
+  const localDependencies = Object.fromEntries(Object.entries(dependencies).filter(([name]) => name !== '@starlight-intelligence/creator-storage-s3'))
+  writeFileSync(join(localOnly, 'package.json'), JSON.stringify({ name: 'creator-local-only-consumer', version: '0.0.0', private: true, type: 'module', dependencies: localDependencies }))
+  execFileSync(process.execPath, [npmCli, 'install', '--omit=optional', '--ignore-scripts', '--no-audit', '--no-fund', '--fetch-retries=0', '--fetch-timeout=20000', '--registry=https://registry.npmjs.org'], { cwd: localOnly, env, stdio: 'pipe', timeout: 300_000 })
+  if (existsSync(join(localOnly, 'node_modules', '@starlight-intelligence', 'creator-storage-s3')) || existsSync(join(localOnly, 'node_modules', '@aws-sdk', 'client-s3'))) throw new Error('Local-only installation still requires S3')
+  const localCli = join(localOnly, 'node_modules', '@starlight-intelligence', 'creator-mcp', 'dist', 'main.js')
+  if (!run([localCli, 'doctor']).includes('OK')) throw new Error('Local-only doctor failed without S3')
+  writeFileSync(join(env.CREATOR_MCP_HOME, 'config.json'), JSON.stringify({ storage: { s3: { bucket: 'missing-optional-fixture' } } }))
+  let diagnosedMissing = false
+  try { run([localCli, 'doctor']) } catch (err) {
+    diagnosedMissing = String(err.stdout).includes('optional creator-storage-s3 is not installed')
+  } finally { writeFileSync(join(env.CREATOR_MCP_HOME, 'config.json'), '{}') }
+  if (!diagnosedMissing) throw new Error('Missing optional S3 was not precisely diagnosed')
   check = 'declarations'
   const imports = targets.map((t, i) => `import * as p${i} from '${t.name}';\nexport const surface${i} = p${i};`).join('\n')
   writeFileSync(join(consumer, 'types.ts'), imports)
@@ -100,7 +115,7 @@ try {
 `)
   run(['protocol.mjs'])
   const evidence = { schemaVersion: 1, sourceSha, manifestSha256: digest(receiptBytes), status: 'passed',
-    checks: ['all-ten-artifact-install', 'strict-public-declarations', 'installed-setup-identity', 'doctor-without-provider-keys', 'bundled-starter-discovery', 'installed-init-launch-and-isolation', 'init-existing-config-preserved', 'installed-storage-link-boundary', 'official-stdio-tool-discovery', 'unapproved-publication-denied'] }
+    checks: ['all-ten-artifact-install', 'optional-s3-omitted-install-and-doctor', 'strict-public-declarations', 'installed-setup-identity', 'doctor-without-provider-keys', 'bundled-starter-discovery', 'installed-init-launch-and-isolation', 'init-existing-config-preserved', 'installed-storage-link-boundary', 'official-stdio-tool-discovery', 'unapproved-publication-denied'] }
   writeFileSync(join(releaseDir, 'consumer.json'), JSON.stringify(evidence, null, 2) + '\n')
   console.log(JSON.stringify(evidence, null, 2))
 } catch {

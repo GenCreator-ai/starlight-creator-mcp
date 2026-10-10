@@ -4,4 +4,31 @@ S3-compatible storage connector (AWS S3, Cloudflare R2, MinIO) for the creator s
 
 Part of the [Starlight creator substrate](https://github.com/frankxai/starlight-creator-mcp). BYOK and local-first.
 
+S3 is an optional server dependency; local-only installs can use `npm install --omit=optional`.
+An explicitly configured bucket requires this connector and both S3 credentials. Native AWS
+uses the SDK region chain (explicit `region`, `AWS_REGION`, shared AWS config); only custom
+endpoints default to `auto`. A missing region is an error, not an invented AWS region.
+
+Set `policy.allowHosts` to the exact SDK endpoint hostname(s), e.g.
+`s3.us-east-1.amazonaws.com` for path-style AWS, or your account's R2 endpoint.
+Configuration does not automatically trust an endpoint. SDK requests use `guardedFetch`,
+including connection-time DNS checks, redirect validation, deadlines and `maxAssetBytes`.
+Private endpoints remain blocked; the private-host override is for isolated tests only.
+Downloads are streamed within the byte budget and verified against the content-addressed
+SHA-256; only missing objects return null. Authentication/network/size/integrity failures throw.
+
+`presignUpload(sha256, ext, mime)` returns a credential-authenticated SigV4 URL.
+Uploaders **must** send `Content-Type: <mime>` and
+`x-amz-checksum-sha256: <base64 of the 32 digest bytes, not the hex text>`.
+Both headers are signed; S3 verifies the body checksum. Treat the URL as a short-lived
+bearer capability and never log it. Browser requests require matching bucket CORS rules.
+Presigning performs no upload and does not prove credentials or write permission work.
+The non-writing doctor HEAD probe may return 403 for a missing object without ListBucket;
+this is indeterminate access, not proof of rejected credentials. It fails the check without
+claiming GetObject/PutObject were tested.
+
+Contracts: [AWS region configuration](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-region.html),
+[HeadObject permissions](https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html),
+[official SDK checksum signing example](https://github.com/aws/aws-sdk-js-v3/tree/main/packages/s3-request-presigner).
+
 MIT.

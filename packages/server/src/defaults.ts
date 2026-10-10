@@ -23,17 +23,29 @@ export function defaultProviders(vault: Vault): Provider[] {
 
 /**
  * S3 is optional: the AWS SDK is a large dependency, so it is loaded only when a bucket is
- * configured and the package is installed. Absence degrades to local + rclone, never an error.
+ * configured and the package is installed. Explicit S3 configuration must be diagnosable.
  */
 export async function defaultStorageConnectors(vault: Vault, cfg: CreatorConfig): Promise<StorageConnector[]> {
   if (!cfg.storage.s3?.bucket) return []
   try {
     const mod = await import('@starlight-intelligence/creator-storage-s3')
-    const s3 = await mod.createS3Storage(vault, cfg.storage.s3)
+    const s3 = await mod.createS3Storage(vault, cfg.storage.s3, {
+      allowHosts: cfg.policy.allowHosts,
+      allowPrivateHosts: process.env.CREATOR_ALLOW_PRIVATE_HOSTS === '1' && cfg.policy.allowPrivateHosts,
+      maxBytes: cfg.policy.maxAssetBytes,
+    })
     return s3 ? [s3] : []
-  } catch {
-    return []
+  } catch (err) {
+    if (isMissingS3Package(err)) {
+      throw new Error('S3 is configured but optional creator-storage-s3 is not installed; install @starlight-intelligence/creator-storage-s3 or remove storage.s3 configuration', { cause: err })
+    }
+    throw err
   }
+}
+
+export function isMissingS3Package(err: unknown): boolean {
+  const e = err as NodeJS.ErrnoException | null
+  return e?.code === 'ERR_MODULE_NOT_FOUND' && /^Cannot find package '@starlight-intelligence\/creator-storage-s3' imported from /.test(e.message)
 }
 
 export function packsFromEnv(): string[] {

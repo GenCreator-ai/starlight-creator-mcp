@@ -1,5 +1,5 @@
 import {
-  guardedFetch, ProviderError, readBodyLimited, SECRET_NAMES,
+  guardedFetch, ProviderError, readBodyLimited, SECRET_NAMES, sniffMime,
   type FetchPolicy, type GenerationRequest, type ModelRecord, type Provider, type ProviderJob, type Vault,
 } from '@starlight-intelligence/creator-core'
 
@@ -20,11 +20,11 @@ interface ElevenModel { model_id: string; name?: string; can_do_text_to_speech?:
 interface ElevenVoice { voice_id: string; name?: string }
 
 function outputFormat(format: unknown): string {
-  return String(format ?? 'mp3') === 'wav' ? 'pcm_44100' : 'mp3_44100_128'
+  return String(format ?? 'mp3') === 'wav' ? 'wav_44100' : 'mp3_44100_128'
 }
 
 function mimeFor(format: string): string {
-  return format.startsWith('pcm') || format.startsWith('wav') ? 'audio/wav' : 'audio/mpeg'
+  return format.startsWith('wav') ? 'audio/wav' : 'audio/mpeg'
 }
 
 export interface ElevenLabsProviderOptions { vault: Vault; fetchPolicy?: FetchPolicy; baseUrl?: string; defaultVoiceId?: string }
@@ -35,8 +35,8 @@ export function createElevenLabsProvider(opts: ElevenLabsProviderOptions): Provi
   const policy: FetchPolicy = {
     allowHosts: [...(opts.fetchPolicy?.allowHosts ?? []), ELEVENLABS_HOST, host],
     allowPrivateHosts: opts.fetchPolicy?.allowPrivateHosts ?? false,
-    timeoutMs: 180_000,
-    maxBytes: MAX_AUDIO_BYTES,
+    timeoutMs: opts.fetchPolicy?.timeoutMs ?? 180_000,
+    maxBytes: Math.min(opts.fetchPolicy?.maxBytes ?? MAX_AUDIO_BYTES, MAX_AUDIO_BYTES),
   }
   const key = () => opts.vault.require(SECRET_NAMES.elevenlabs, 'Create a key at elevenlabs.io, then run `creator-mcp setup` or set ELEVENLABS_API_KEY.')
   const headers = async (json = true) => ({ 'xi-api-key': await key(), ...(json ? { 'Content-Type': 'application/json' } : {}) })
@@ -63,10 +63,18 @@ export function createElevenLabsProvider(opts: ElevenLabsProviderOptions): Provi
     if (!res.ok) throw new ProviderError(`elevenlabs ${new URL(url).pathname} ${res.status}: ${(await res.text()).slice(0, 200)}`, 'elevenlabs', res.status >= 500 || res.status === 429, res.status)
     const bytes = await readBodyLimited(res, MAX_AUDIO_BYTES)
     if (!bytes.byteLength) throw new ProviderError('elevenlabs returned an empty audio body', 'elevenlabs')
+    const mime = res.headers.get('content-type')?.split(';')[0]?.trim()
+    if (mime && !['audio/mpeg', 'audio/wav', 'audio/x-wav', 'application/octet-stream'].includes(mime)) {
+      throw new ProviderError('elevenlabs returned a non-audio body', 'elevenlabs')
+    }
+    if (format.startsWith('wav') && (bytes.length < 44 || Buffer.from(bytes.subarray(0, 4)).toString() !== 'RIFF' || Buffer.from(bytes.subarray(8, 12)).toString() !== 'WAVE')) {
+      throw new ProviderError('elevenlabs returned invalid WAV bytes', 'elevenlabs')
+    }
+    if (format.startsWith('mp3') && sniffMime(bytes) !== 'audio/mpeg') throw new ProviderError('elevenlabs returned invalid MP3 bytes', 'elevenlabs')
     return {
       providerJobId: `inline-${Date.now()}`,
       status: 'completed',
-      result: { outputs: [{ bytes, mime: res.headers.get('content-type')?.split(';')[0] ?? mimeFor(format), kind: 'audio' }] },
+      result: { outputs: [{ bytes, mime: mimeFor(format), kind: 'audio' }] },
     }
   }
 
@@ -78,16 +86,19 @@ export function createElevenLabsProvider(opts: ElevenLabsProviderOptions): Provi
 
     async listModels(): Promise<ModelRecord[]> {
       const models: ModelRecord[] = [...SYNTHETIC]
-      try {
-        const res = await guardedFetch(`${base}/v1/models`, { headers: await headers(false), policy })
-        if (res.ok) {
-          const list = (await res.json()) as ElevenModel[]
-          for (const m of list) {
-            if (m.can_do_text_to_speech === false) continue
-            models.push({ id: `elevenlabs/${m.model_id}`, provider: 'elevenlabs', modelId: m.model_id, name: m.name ?? m.model_id, tasks: ['tts'] })
-          }
-        }
-      } catch { /* fall back to the synthetic default below */ }
+      const res = await guardedFetch(`${base}/v1/models`, { headers: await headers(false), policy })
+      if (!res.ok) {
+        await res.body?.cancel()
+        throw new ProviderError(`elevenlabs models ${res.status}`, 'elevenlabs', res.status >= 500 || res.status === 429, res.status)
+      }
+      const list: unknown = await res.json()
+      if (!Array.isArray(list) || list.some(m => !m || typeof m.model_id !== 'string' || !m.model_id)) {
+        throw new ProviderError('elevenlabs returned malformed models', 'elevenlabs')
+      }
+      for (const m of list as ElevenModel[]) {
+        if (m.can_do_text_to_speech === false) continue
+        models.push({ id: `elevenlabs/${m.model_id}`, provider: 'elevenlabs', modelId: m.model_id, name: m.name ?? m.model_id, tasks: ['tts'] })
+      }
       if (!models.some(m => m.tasks.includes('tts'))) {
         models.push({ id: `elevenlabs/${DEFAULT_TTS_MODEL}`, provider: 'elevenlabs', modelId: DEFAULT_TTS_MODEL, name: 'Eleven Multilingual v2', tasks: ['tts'] })
       }
@@ -106,18 +117,21 @@ export function createElevenLabsProvider(opts: ElevenLabsProviderOptions): Provi
       }
       if (req.task === 'sfx') {
         if (!req.prompt) throw new ProviderError('prompt is required for sound effects', 'elevenlabs')
-        const body: Record<string, unknown> = { text: req.prompt, model_id: DEFAULT_SFX_MODEL, output_format: format }
+        if (format.startsWith('wav')) throw new ProviderError('ElevenLabs sound effects does not support WAV output; request mp3', 'elevenlabs')
+        const body: Record<string, unknown> = { text: req.prompt, model_id: DEFAULT_SFX_MODEL }
         // the API accepts 0.5-30s; anything else is left to auto-detection
         const d = Number(p.duration_s)
         if (Number.isFinite(d) && d >= 0.5 && d <= 30) body.duration_seconds = d
-        return audioJob(`${base}/v1/sound-generation`, body, format)
+        return audioJob(`${base}/v1/sound-generation?output_format=${format}`, body, format)
       }
       if (req.task === 'music') {
         if (!req.prompt) throw new ProviderError('prompt is required for music', 'elevenlabs')
-        const body: Record<string, unknown> = { prompt: req.prompt, output_format: format }
+        // Music's output enum has PCM, not WAV. Do not advertise raw PCM as a WAV asset.
+        if (format.startsWith('wav')) throw new ProviderError('ElevenLabs music does not support WAV output; request mp3', 'elevenlabs')
+        const body: Record<string, unknown> = { prompt: req.prompt, model_id: req.model.modelId }
         const d = Number(p.duration_s)
         if (Number.isFinite(d)) body.music_length_ms = Math.min(Math.max(Math.round(d * 1000), 3000), 600_000)
-        return audioJob(`${base}/v1/music/compose`, body, format)
+        return audioJob(`${base}/v1/music?output_format=${format}`, body, format)
       }
       throw new ProviderError(`elevenlabs handles tts, sfx and music; not ${req.task}`, 'elevenlabs')
     },
