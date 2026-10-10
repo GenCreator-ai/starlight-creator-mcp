@@ -1,5 +1,6 @@
 import { isIP } from 'node:net'
 import { lookup } from 'node:dns/promises'
+import { Agent } from 'undici'
 
 export interface FetchPolicy {
   allowHosts: string[]
@@ -16,12 +17,13 @@ export class FetchGuardError extends Error {
 
 function isPrivateIPv4(ip: string): boolean {
   const [a, b] = ip.split('.').map(Number) as [number, number]
-  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127)
+  return a === 10 || a === 127 || a === 0 || a >= 224 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127)
 }
 
 function isPrivateIPv6(ip: string): boolean {
-  const low = ip.toLowerCase()
-  return low === '::1' || low === '::' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80') || low.startsWith('::ffff:')
+  let low = ip.toLowerCase()
+  try { low = new URL(`http://[${low}]`).hostname.slice(1, -1) } catch { /* Scoped link-local addresses are handled by their prefix. */ }
+  return low === '::1' || low === '::' || low.startsWith('fc') || low.startsWith('fd') || /^fe[89ab]/.test(low) || low.startsWith('ff') || low.startsWith('::ffff:')
 }
 
 export function isPrivateHost(host: string): boolean {
@@ -74,11 +76,31 @@ export async function guardedFetch(input: string | URL, init: RequestInit & { po
   const abort = () => controller.abort()
   let bodyOwnsDeadline = false
   let abortBody: () => void = () => {}
+  let disposed = false
   const cleanup = () => {
+    if (disposed) return
+    disposed = true
     clearTimeout(timeout)
     outerSignal?.removeEventListener('abort', abort)
     controller.signal.removeEventListener('abort', abortBody)
+    void dispatcher.destroy().catch(() => {})
   }
+  const dispatcher = new Agent({
+    connect: {
+      lookup(host, options, callback) {
+        void withinDeadline(() => lookup(host, { all: true })).then(addresses => {
+          if (!addresses.length || addresses.some(address => !isIP(address.address))) throw new FetchGuardError('invalid connection DNS answer', 'host_not_allowed')
+          if (!policy.allowPrivateHosts && addresses.some(address => isPrivateHost(address.address))) throw new FetchGuardError('connection resolves to private address', 'private_host')
+          const family = options.family === 'IPv4' ? 4 : options.family === 'IPv6' ? 6 : options.family
+          const selected = family ? addresses.filter(address => address.family === family) : addresses
+          if (!selected.length) throw new FetchGuardError('connection DNS family unavailable', 'host_not_allowed')
+          // Pass checked addresses directly to net.connect; no subsequent DNS lookup.
+          if (options.all) callback(null, selected)
+          else callback(null, selected[0]!.address, selected[0]!.family)
+        }).catch(error => callback(error as Error, '', 0))
+      },
+    },
+  })
   const withinDeadline = async <T>(operation: () => Promise<T>): Promise<T> => {
     controller.signal.throwIfAborted()
     let rejectAbort: () => void = () => {}
@@ -96,7 +118,9 @@ export async function guardedFetch(input: string | URL, init: RequestInit & { po
       controller.signal.throwIfAborted()
       await withinDeadline(() => assertUrlAllowed(url, policy))
       controller.signal.throwIfAborted()
-      const res = await fetch(url, { ...request, signal: controller.signal, redirect: 'manual' })
+      // Node's declarations pin older undici-types; the native dispatcher API is compatible.
+      const dispatchRequest = { ...request, dispatcher: dispatcher as unknown as RequestInit['dispatcher'], signal: controller.signal, redirect: 'manual' as const }
+      const res = await fetch(url, dispatchRequest)
       if ([301, 302, 303, 307, 308].includes(res.status) && res.headers.has('location')) {
         await withinDeadline(async () => { await res.body?.cancel() })
         if (redirects >= 20) throw new FetchGuardError('redirect limit exceeded', 'redirect_blocked')
@@ -155,6 +179,7 @@ export async function guardedFetch(input: string | URL, init: RequestInit & { po
     }
   } catch (err) {
     if ((err as Error).name === 'AbortError') throw new FetchGuardError(`fetch ${url.host} timed out`, 'timeout')
+    if ((err as Error).cause instanceof FetchGuardError) throw (err as Error).cause
     throw err
   } finally {
     if (!bodyOwnsDeadline) cleanup()

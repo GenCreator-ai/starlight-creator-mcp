@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { guardedFetch } from './fetch-guard.js'
+import { guardedFetch, isPrivateHost } from './fetch-guard.js'
 import { lookup } from 'node:dns/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -13,6 +13,12 @@ const redirect = (location: string, status = 302) => new Response(null, { status
 afterEach(() => { vi.unstubAllGlobals(); vi.mocked(lookup).mockReset() })
 
 describe('guarded redirect requests', () => {
+  it('rejects equivalent IPv6 private addresses and non-unicast destinations', () => {
+    for (const address of ['0:0:0:0:0:0:0:1', '0:0:0:0:0:ffff:7f00:1', 'fe90::1', 'fea0::1', 'feb0::1', 'ff02::1', '224.0.0.1', '255.255.255.255']) {
+      expect(isPrivateHost(address), address).toBe(true)
+    }
+    expect(isPrivateHost('2606:4700:4700::1111')).toBe(false)
+  })
   it('drops every caller header on an origin change, including custom provider keys', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(redirect('http://127.0.0.1:3022/asset')).mockResolvedValueOnce(new Response('asset'))
     vi.stubGlobal('fetch', fetch)
@@ -156,6 +162,38 @@ describe('guarded redirect requests', () => {
       const response = await guardedFetch(url, { policy: { ...policy, timeoutMs: 150 } })
       expect(response.status).toBe(200)
       await expect(response.json()).rejects.toMatchObject({ code: 'timeout' })
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    }
+  })
+
+  it('blocks a public preflight answer that rebinds to loopback at socket lookup', async () => {
+    let requests = 0
+    const server = createServer((_request, response) => { requests++; response.end('must not be reached') })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    vi.mocked(lookup).mockResolvedValueOnce([{ address: '8.8.8.8', family: 4 }] as never)
+      .mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }] as never)
+    try {
+      const url = `http://fixture.invalid:${(server.address() as AddressInfo).port}/fixture`
+      await expect(guardedFetch(url, { policy: { allowHosts: ['fixture.invalid'], timeoutMs: 1000 } })).rejects.toMatchObject({ code: 'private_host' })
+      expect(lookup).toHaveBeenCalledTimes(2)
+      expect(requests).toBe(0)
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    }
+  })
+
+  it('connects through checked DNS addresses with the explicit private-host fixture policy', async () => {
+    const server = createServer((_request, response) => response.end('{"checked":true}'))
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    vi.mocked(lookup).mockResolvedValue([{ address: '127.0.0.1', family: 4 }] as never)
+    try {
+      const url = `http://fixture.invalid:${(server.address() as AddressInfo).port}/fixture`
+      const response = await guardedFetch(url, { policy: { allowHosts: ['fixture.invalid'], allowPrivateHosts: true, timeoutMs: 1000 } })
+      expect(await response.json()).toEqual({ checked: true })
+      expect(lookup).toHaveBeenCalledTimes(1)
     } finally {
       server.closeAllConnections()
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
