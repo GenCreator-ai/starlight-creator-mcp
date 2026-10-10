@@ -75,6 +75,9 @@ provenance metadata are retained. An offline regression shows that empty user/gl
 configs alone still admit parent project configuration, while the isolated runtime
 uses the public registry. Signed npm trusted-publisher configuration remains the
 authorization boundary; workflow environment strings are checks against accidents.
+Consumer verification invalidates previous success before parsing the manifest or
+installing artifacts. A failed rerun cannot retain a prior positive receipt; an
+executable malformed-manifest regression covers that recovery boundary.
 
 10 October follow-up: regression fixtures exposed partial terminators, hidden
 trailing members, incomplete padding and ambiguous path/numeric fields accepted

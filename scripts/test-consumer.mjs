@@ -7,6 +7,8 @@ import { validateReceipt, targets, digest } from './release-contract.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const releaseDir = join(root, 'artifacts', 'npm-release')
+// Clear prior success before even manifest parsing, artifact checks or installation can fail.
+writeFileSync(join(releaseDir, 'consumer.json'), JSON.stringify({ schemaVersion: 1, status: 'failed', checks: [] }) + '\n')
 const receiptBytes = readFileSync(join(releaseDir, 'manifest.json'))
 const receipt = JSON.parse(receiptBytes)
 if (!Array.isArray(receipt.packages) || receipt.packages.some(row => !/^[a-z0-9.-]+\.tgz$/.test(row.file))) throw new Error('Invalid receipt artifact path')

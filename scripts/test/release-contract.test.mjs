@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { gzipSync, gunzipSync } from 'node:zlib'
 import { resolve, join, dirname } from 'node:path'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { targets, readTar, validateEntries, validateGraph, validateReceipt, digest, integrity, pnpmInvocation } from '../release-contract.mjs'
@@ -179,4 +179,25 @@ test('registry recovery distinguishes missing versions from errors and rejects i
   }), 'fixture-integrity')
   assert.equal(new URL(request.url).origin, 'https://registry.npmjs.org')
   assert.equal(request.options.redirect, 'error')
+})
+
+test('a failed consumer rerun invalidates previous success before malformed manifest parsing', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'creator-consumer-denial-'))
+  try {
+    writeFileSync(join(fixture, 'consumer.json'), JSON.stringify({ status: 'passed', checks: ['previous-success'] }))
+    writeFileSync(join(fixture, 'manifest.json'), 'malformed-json')
+    // Run the actual consumer entry with only its artifact directory and import location relocated.
+    const source = readFileSync(new URL('../test-consumer.mjs', import.meta.url), 'utf8')
+    const declaration = "const releaseDir = join(root, 'artifacts', 'npm-release')"
+    assert.ok(source.includes(declaration))
+    const relocated = source.replace(declaration, 'const releaseDir = ' + JSON.stringify(fixture))
+      .replace("'./release-contract.mjs'", JSON.stringify(new URL('../release-contract.mjs', import.meta.url).href))
+    const entry = join(fixture, 'consumer-fixture.mjs')
+    writeFileSync(entry, relocated)
+    assert.throws(() => execFileSync(process.execPath, [entry], { timeout: 10_000, stdio: 'pipe' }))
+    assert.deepEqual(JSON.parse(readFileSync(join(fixture, 'consumer.json'))), { schemaVersion: 1, status: 'failed', checks: [] })
+  } finally {
+    assert.equal(dirname(resolve(fixture)), resolve(tmpdir()))
+    rmSync(fixture, { recursive: true, force: true })
+  }
 })
