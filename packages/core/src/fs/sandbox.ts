@@ -22,7 +22,11 @@ async function realWithMissingLeaf(full: string): Promise<string> {
   let candidate = path.resolve(full)
   const missing: string[] = []
   for (;;) {
-    try { return path.join(await realpath(candidate), ...missing) } catch (error) {
+    try {
+      const real = await realpath(candidate)
+      if (missing.length && !(await lstat(real)).isDirectory()) throw new SandboxError('Sandbox parent is not a directory')
+      return path.join(real, ...missing)
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new SandboxError('Cannot resolve sandbox path')
       // A dangling link is not an ordinary uncreated directory.
       try {
