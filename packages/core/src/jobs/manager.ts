@@ -2,7 +2,7 @@ import type { AssetStore } from '../assets/store.js'
 import { ulid } from '../ids.js'
 import type { AssetRow, Ledger } from '../ledger/interface.js'
 import type { Logger } from '../log.js'
-import { guardedFetch, readBodyLimited, type FetchPolicy } from '../net/fetch-guard.js'
+import { discardBody, guardedFetch, readBodyLimited, type FetchPolicy } from '../net/fetch-guard.js'
 import type { ProviderRegistry } from '../provider/registry.js'
 import type { GenerationRequest, JobRecord, ProviderJob, ProviderResult, Task } from '../types.js'
 
@@ -120,7 +120,10 @@ export class JobManager {
     const host = new URL(url).hostname
     const policy: FetchPolicy = { ...this.o.fetchPolicy, allowHosts: [...this.o.fetchPolicy.allowHosts, ...provider.allowHosts, host], maxBytes: this.o.maxAssetBytes, timeoutMs: 120_000 }
     const res = await guardedFetch(url, { policy })
-    if (!res.ok) throw new Error(`download ${host} returned ${res.status}`)
+    if (!res.ok) {
+      await discardBody(res)
+      throw new Error(`download ${host} returned ${res.status}`)
+    }
     return readBodyLimited(res, this.o.maxAssetBytes)
   }
 

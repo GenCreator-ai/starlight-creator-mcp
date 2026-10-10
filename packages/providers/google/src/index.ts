@@ -1,4 +1,4 @@
-import { guardedFetch, ProviderError, SECRET_NAMES, type FetchPolicy, type ModelRecord, type Provider, type ProviderJob, type TextRequest, type TextResult, type Vault } from '@starlight-intelligence/creator-core'
+import { discardBody, guardedFetch, ProviderError, SECRET_NAMES, type FetchPolicy, type ModelRecord, type Provider, type ProviderJob, type TextRequest, type TextResult, type Vault } from '@starlight-intelligence/creator-core'
 
 export const GOOGLE_HOST = 'generativelanguage.googleapis.com'
 const DEFAULT_JUDGE = 'gemini-2.5-flash'
@@ -18,7 +18,10 @@ export function createGoogleProvider(opts: GoogleProviderOptions): Provider {
     async isConfigured() { return !!(await opts.vault.resolve(SECRET_NAMES.gemini)) },
     async listModels(): Promise<ModelRecord[]> {
       const res = await guardedFetch(`${base}/v1beta/models?pageSize=200`, { headers: { 'x-goog-api-key': await key() }, policy })
-      if (!res.ok) throw new ProviderError(`google models ${res.status}`, 'google', res.status >= 500, res.status)
+      if (!res.ok) {
+        await discardBody(res)
+        throw new ProviderError(`google models ${res.status}`, 'google', res.status >= 500, res.status)
+      }
       const data = (await res.json()) as { models?: Array<{ name: string; displayName?: string; supportedGenerationMethods?: string[] }> }
       return (data.models ?? []).filter(m => m.supportedGenerationMethods?.includes('generateContent')).map(m => {
         const id = m.name.replace(/^models\//, '')

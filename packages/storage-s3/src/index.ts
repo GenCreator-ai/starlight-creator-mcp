@@ -39,6 +39,8 @@ export class S3Storage implements StorageConnector {
       forcePathStyle: o.forcePathStyle ?? true,
       credentials: { accessKeyId: o.accessKeyId, secretAccessKey: o.secretAccessKey },
       maxAttempts: 1,
+      // Fetch rejects Expect: 100-continue; Expect is never part of the SigV4 signature.
+      expectContinueHeader: false,
       requestHandler: {
         async handle(request: {
           protocol: string; hostname: string; port?: number; path: string; method: string
@@ -49,7 +51,7 @@ export class S3Storage implements StorageConnector {
             for (const v of Array.isArray(value) ? value : [value]) url.searchParams.append(name, v ?? '')
           }
           const response = await guardedFetch(url, {
-            method: request.method, headers: request.headers,
+            method: request.method, headers: fetchHeaders(request.headers, request.body),
             body: request.body as RequestInit['body'], signal: options.abortSignal, policy,
           })
           return { response: {
@@ -141,6 +143,27 @@ export class S3Storage implements StorageConnector {
       return { ok: false, detail: `${this.o.bucket}: ${e.name ?? (err as Error).message}` }
     }
   }
+}
+
+/**
+ * Fetch derives Content-Length from the buffered body and rejects caller-supplied
+ * Content-Length/Expect. The signed Content-Length must equal the bytes fetch sends,
+ * so only buffered bodies are accepted and any mismatch fails closed.
+ */
+function fetchHeaders(headers: Record<string, string>, body: unknown): Headers {
+  if (body != null && typeof body !== 'string' && !(body instanceof Uint8Array)) throw new Error('S3 request body must be buffered')
+  const length = body == null ? 0 : typeof body === 'string' ? Buffer.byteLength(body) : body.byteLength
+  const out = new Headers()
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase()
+    if (lower === 'expect' || lower === 'transfer-encoding') continue
+    if (lower === 'content-length') {
+      if (!/^\d+$/.test(value) || Number(value) !== length) throw new Error('S3 signed content-length does not match request body')
+      continue
+    }
+    out.set(name, value)
+  }
+  return out
 }
 
 function isMissingObject(err: unknown): boolean {

@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import * as z from 'zod/v4'
-import { guardedFetch, readBodyLimited, resolveInside, sniffMime, type AssetFilter, type Task } from '@starlight-intelligence/creator-core'
+import { discardBody, guardedFetch, readBodyLimited, resolveInside, sniffMime, type AssetFilter, type Task } from '@starlight-intelligence/creator-core'
 import { embedAsset, scoreOutOf, summarizeAsset, textLine } from '../content.js'
 import { errorResult, toolError } from '../errors.js'
 import { assetRef, assetSummary, scoreOut, task } from '../schemas.js'
@@ -85,7 +85,7 @@ export const assetSync = defineTool({
     try {
       if (a.import_url) {
         const res = await guardedFetch(a.import_url, { policy: { ...ctx.fetchPolicy, maxBytes: ctx.config.policy.maxAssetBytes } })
-        if (!res.ok) return toolError(`fetch returned ${res.status}`)
+        if (!res.ok) { await discardBody(res); return toolError(`fetch returned ${res.status}`) }
         const bytes = await readBodyLimited(res, ctx.config.policy.maxAssetBytes)
         const row = await ctx.assets.ingest({ bytes, mime: a.mime ?? res.headers.get('content-type') ?? sniffMime(bytes), provenance: { task: 'import', origin: { kind: 'imported_url', ref: a.import_url }, pack: { ids: ctx.merged.packs.map(p => p.id), digest: ctx.merged.digest } } })
         const out = { asset: summarizeAsset(ctx, row) }

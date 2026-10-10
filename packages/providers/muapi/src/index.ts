@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  guardedFetch, ProviderError, SECRET_NAMES, type FetchPolicy, type GenerationRequest, type ModelRecord, type Provider, type ProviderJob, type Task, type Vault,
+  discardBody, guardedFetch, ProviderError, SECRET_NAMES, type FetchPolicy, type GenerationRequest, type ModelRecord, type Provider, type ProviderJob, type Task, type Vault,
 } from '@starlight-intelligence/creator-core'
 
 export const MUAPI_HOSTS = ['api.muapi.ai', '*.muapi.ai']
@@ -45,7 +45,10 @@ export function createMuapiProvider(opts: MuapiProviderOptions): Provider {
     const form = new FormData()
     form.append('file', new Blob([bytes], { type: mime }), name)
     const res = await guardedFetch(`${base}/api/v1/upload_file`, { method: 'POST', headers: await headers(false), body: form, policy })
-    if (!res.ok) throw new ProviderError(`muapi upload failed: ${res.status}`, 'muapi', res.status >= 500, res.status)
+    if (!res.ok) {
+      await discardBody(res)
+      throw new ProviderError(`muapi upload failed: ${res.status}`, 'muapi', res.status >= 500, res.status)
+    }
     const data = (await res.json()) as { url?: string; file_url?: string; data?: { url?: string } }
     const url = data.url ?? data.file_url ?? data.data?.url
     if (!url) throw new ProviderError('muapi upload returned no url', 'muapi')
@@ -56,7 +59,7 @@ export function createMuapiProvider(opts: MuapiProviderOptions): Provider {
     let lastErr: unknown
     for (let attempt = 1; attempt <= 3; attempt++) {
       const res = await guardedFetch(`${base}/api/v1/${endpoint}`, { method: 'POST', headers: await headers(), body: JSON.stringify(payload), policy })
-      if (res.status >= 500) { lastErr = new ProviderError(`muapi ${endpoint} ${res.status}`, 'muapi', true, res.status); await new Promise(r => setTimeout(r, 500 * attempt)); continue }
+      if (res.status >= 500) { await discardBody(res); lastErr = new ProviderError(`muapi ${endpoint} ${res.status}`, 'muapi', true, res.status); await new Promise(r => setTimeout(r, 500 * attempt)); continue }
       if (!res.ok) throw new ProviderError(`muapi ${endpoint} failed: ${res.status} ${(await res.text()).slice(0, 200)}`, 'muapi', false, res.status)
       const raw = (await res.json()) as Record<string, unknown>
       return { requestId: (raw.request_id as string | undefined) ?? (raw.id as string | undefined) ?? null, raw }
@@ -103,7 +106,7 @@ export function createMuapiProvider(opts: MuapiProviderOptions): Provider {
     },
     async poll(providerJobId: string, task: Task): Promise<ProviderJob> {
       const res = await guardedFetch(`${base}/api/v1/predictions/${encodeURIComponent(providerJobId)}/result`, { headers: await headers(false), policy })
-      if (res.status >= 500) return { providerJobId, status: 'running' }
+      if (res.status >= 500) { await discardBody(res); return { providerJobId, status: 'running' } }
       if (!res.ok) throw new ProviderError(`muapi poll ${res.status}: ${(await res.text()).slice(0, 160)}`, 'muapi', false, res.status)
       const data = (await res.json()) as Record<string, unknown>
       const status = String(data.status ?? '').toLowerCase()
