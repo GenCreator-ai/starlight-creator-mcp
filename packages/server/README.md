@@ -8,8 +8,11 @@ Brand wrappers call this with their own pack and a `tools` curation block to ren
 
 Composite call steps can target only available, unhidden built-in tools. Nested
 composites and brand-tool calls are unsupported; unavailable targets reject pack
-registration. Built-in errors stop the composite and remain errors. Template
-substitution uses flat variable keys and string values, so nested property lookup
+registration. Built-in errors stop the composite and remain errors.
+Public approval and publication tools must be invoked separately and cannot be
+called by pack composites. An unexpected interactive-pause result stops with an
+error instead of discarding the request or replaying earlier generation steps.
+Template substitution uses flat variable keys and string values, so nested property lookup
 and dynamically typed number/boolean arguments are unsupported.
 
 Tool names after aliasing and prompt names must be unique. Collisions reject
