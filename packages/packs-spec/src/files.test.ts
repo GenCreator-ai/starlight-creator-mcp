@@ -47,6 +47,7 @@ describe('pack file boundaries', () => {
     expect(matches('canon/one.md')).toBe(true)
     expect(matches('canon/nested/two.md')).toBe(true)
     expect(matches('canon/nested/two.txt')).toBe(false)
+    expect(compilePackGlob('canon\\**\\*.md')('canon\\nested\\two.md')).toBe(true)
     expect(compilePackGlob('*.md')('nested/a.md')).toBe(false)
     expect(compilePackGlob('*a'.repeat(100) + 'z')('a'.repeat(4096))).toBe(false)
     expect(() => compilePackGlob('../**')).toThrow()

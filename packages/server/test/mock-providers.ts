@@ -31,7 +31,7 @@ export async function startMockProviders(): Promise<{ server: Server; url: strin
         return json(200, { data: [{ b64_json: Buffer.concat([PNG_1x1, Buffer.from([state.orCalls.length])]).toString('base64'), media_type: 'image/png' }], usage: { cost: 0.02, is_byok: true } })
       }
       if (url.pathname === '/api/v1/videos' && req.method === 'POST') { state.orCalls.push({ path: url.pathname, body }); pending.set('vid_1', 0); return json(202, { id: 'vid_1', polling_url: '/api/v1/videos/vid_1', status: 'pending' }) }
-      if (url.pathname === '/api/v1/videos/vid_1') { state.videoPolls++; const n = (pending.get('vid_1') ?? 0) + 1; pending.set('vid_1', n); return json(200, n < 2 ? { id: 'vid_1', status: 'in_progress' } : { id: 'vid_1', status: 'completed', unsigned_urls: [`http://localhost:${(server.address() as { port: number }).port}/api/v1/videos/vid_1/content`], usage: { cost: 0.5, is_byok: false } }) }
+      if (url.pathname === '/api/v1/videos/vid_1') { state.videoPolls++; const n = (pending.get('vid_1') ?? 0) + 1; pending.set('vid_1', n); return json(200, n < 2 ? { id: 'vid_1', status: 'in_progress' } : { id: 'vid_1', status: 'completed', unsigned_urls: [`http://127.0.0.1:${(server.address() as { port: number }).port}/api/v1/videos/vid_1/content`], usage: { cost: 0.5, is_byok: false } }) }
       if (url.pathname === '/api/v1/videos/vid_1/content') { res.setHeader('content-type', 'video/mp4'); res.end(Buffer.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32, 1, 2, 3, 4])); return }
       // --- ElevenLabs ---
       if (url.pathname === '/v1/models') return json(200, [{ model_id: 'eleven_multilingual_v2', name: 'Multilingual v2', can_do_text_to_speech: true }])

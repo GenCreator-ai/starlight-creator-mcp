@@ -3,6 +3,7 @@ import { ulid } from '../ids.js'
 import type { AssetRow, Ledger } from '../ledger/interface.js'
 import type { Logger } from '../log.js'
 import { discardBody, guardedFetch, readBodyLimited, type FetchPolicy } from '../net/fetch-guard.js'
+import { ProviderError } from '../provider/interface.js'
 import type { ProviderRegistry } from '../provider/registry.js'
 import type { GenerationRequest, JobRecord, ProviderJob, ProviderResult, Task } from '../types.js'
 
@@ -58,9 +59,10 @@ export class JobManager {
       pj = await provider.poll(job.providerJobId, job.task)
     } catch (err) {
       this.o.log.warn('poll failed', { job: jobId, error: (err as Error).message })
+      if (err instanceof ProviderError && !err.retryable) return this.o.ledger.updateJob(jobId, { status: 'failed', error: err.message })
       return job
     }
-    if (pj.status === 'failed') return this.o.ledger.updateJob(jobId, { status: 'failed', error: pj.error ?? 'provider reported failure' })
+    if (pj.status === 'failed' || pj.status === 'cancelled') return this.o.ledger.updateJob(jobId, { status: pj.status, error: pj.error ?? `provider reported ${pj.status}` })
     if (pj.status === 'completed' && pj.result) return this.ingestResult(job, pj)
     return this.o.ledger.updateJob(jobId, { status: 'running' })
   }
