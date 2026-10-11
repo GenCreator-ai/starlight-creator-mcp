@@ -28,6 +28,11 @@ and cap each read at 8 MiB. Outward links, Windows roots and alternate streams a
 rejected. Protect pack directories from concurrent untrusted mutation; these
 checks are not an OS sandbox.
 
+Pack digests include every regular file under `init.dir`, including nested files.
+Init trees containing links or special files are rejected. Packs with an init
+directory must regenerate any digest or signature created by the earlier
+pre-release implementation, which omitted those contents.
+
 Unknown-entity detection uses the loaded entity-index type labels, with a simple
 English singular form for `s` / `ies` plurals. It only checks a type label followed
 by a capitalized one-word name, using the combined known names and aliases.

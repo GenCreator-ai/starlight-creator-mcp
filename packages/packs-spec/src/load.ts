@@ -1,5 +1,5 @@
-import { readdir } from 'node:fs/promises'
-import { readPackFile, resolvePackPath } from './files.js'
+import { lstat, readdir } from 'node:fs/promises'
+import { checkedPackPath, readPackFile, resolvePackPath } from './files.js'
 import path from 'node:path'
 import { sha256CanonicalJson, sha256Hex } from './hash.js'
 import type { LoadedPack } from './merge.js'
@@ -81,11 +81,30 @@ export function referencedFiles(m: PackManifest): string[] {
   return [...files].sort()
 }
 
+/** Init is copied into a user's workspace; every regular file belongs to its signature. */
+async function initFiles(dir: string, rel: string): Promise<string[]> {
+  const files: string[] = []
+  const walk = async (relative: string) => {
+    if ((await lstat(resolvePackPath(dir, relative))).isSymbolicLink()) throw new PackLoadError('init tree must not contain links')
+    const directory = await checkedPackPath(dir, relative, 'directory')
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const child = path.join(relative, entry.name)
+      if (entry.isSymbolicLink()) throw new PackLoadError('init tree must not contain links')
+      if (entry.isDirectory()) await walk(child)
+      else if (entry.isFile()) files.push(resolvePackPath(dir, child))
+      else throw new PackLoadError('init tree must contain only regular files and directories')
+    }
+  }
+  await walk(rel)
+  return files.sort()
+}
+
 export async function computePackDigest(dir: string, m: PackManifest): Promise<string> {
   const fileHashes: Record<string, string> = {}
   const canonFiles = await resolveCanonFiles(dir, m.canon.paths)
   const refs = referencedFiles(m).map(r => resolvePackPath(dir, r))
-  for (const full of [...new Set([...refs, ...canonFiles])].sort()) {
+  const init = m.init ? await initFiles(dir, m.init.dir) : []
+  for (const full of [...new Set([...refs, ...canonFiles, ...init])].sort()) {
     const rel = path.relative(dir, full).split(path.sep).join('/')
     fileHashes[rel] = sha256Hex(await readPackFile(dir, rel))
   }

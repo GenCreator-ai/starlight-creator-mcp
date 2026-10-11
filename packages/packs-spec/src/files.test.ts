@@ -22,6 +22,25 @@ async function fixture() {
 }
 afterEach(async () => { if (dir) await rm(dir, { recursive: true, force: true }) })
 describe('pack file boundaries', () => {
+  it('binds nested init contents and additions to the pack digest', async () => {
+    const { pack } = await fixture()
+    await mkdir(path.join(pack, 'init/nested'), { recursive: true })
+    await writeFile(path.join(pack, 'init/nested/AGENTS.md'), 'original fixture')
+    const manifest = packManifestSchema.parse({ schemaVersion: PACK_SCHEMA_VERSION, id: 'fixture', name: 'Fixture', version: '1.0.0', license: { type: 'MIT' }, init: { dir: 'init' } })
+    const original = await computePackDigest(pack, manifest)
+    await writeFile(path.join(pack, 'init/nested/AGENTS.md'), 'changed fixture')
+    const changed = await computePackDigest(pack, manifest)
+    expect(changed).not.toBe(original)
+    await writeFile(path.join(pack, 'init/extra.json'), '{}')
+    expect(await computePackDigest(pack, manifest)).not.toBe(changed)
+  })
+  it('rejects links anywhere in a digested init tree', async () => {
+    const { pack, outside } = await fixture()
+    await mkdir(path.join(pack, 'init'))
+    await symlink(outside, path.join(pack, 'init/linked'), process.platform === 'win32' ? 'junction' : 'dir')
+    const manifest = packManifestSchema.parse({ schemaVersion: PACK_SCHEMA_VERSION, id: 'fixture', name: 'Fixture', version: '1.0.0', license: { type: 'MIT' }, init: { dir: 'init' } })
+    await expect(computePackDigest(pack, manifest)).rejects.toThrow(/link|regular/i)
+  })
   it('rejects an outward directory link during validation', async () => {
     const { pack } = await fixture()
     const validation = await validatePackDir(pack)

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { CreatorContext, JsonlLedger, configSchema, createVault } from '@starlight-intelligence/creator-core'
+import { CanonIndex, CreatorContext, JsonlLedger, configSchema, createVault } from '@starlight-intelligence/creator-core'
 import { mergePacks, PACK_SCHEMA_VERSION, packManifestSchema } from '@starlight-intelligence/creator-packs-spec'
 import { createCreatorServer } from './create-server.js'
 import { serveCreatorHttp } from './http.js'
@@ -26,6 +26,23 @@ afterEach(async () => {
   home = undefined!
 })
 describe('owned Creator context lifecycle', () => {
+  it('reads declared empty and non-markdown canon through HTTP resources', async () => {
+    const ctx = await context(), pack = path.join(home, 'pack')
+    await mkdir(path.join(pack, 'canon'), { recursive: true })
+    const documents = [['empty.md', ''], ['data.json', '{"fixture":true}']]
+    for (const [name, text] of documents) await writeFile(path.join(pack, 'canon', name!), text!)
+    const manifest = packManifestSchema.parse({ schemaVersion: PACK_SCHEMA_VERSION, id: 'fixture', name: 'Fixture', version: '1.0.0', license: { type: 'MIT' }, canon: { paths: ['canon/*'] } })
+    ctx.packs.merged = mergePacks([{ dir: pack, manifest, digest: 'a'.repeat(64) }], '0.1.0')
+    ctx.packs.canon = await CanonIndex.build(ctx.packs.merged)
+    const running = await serveCreatorHttp({ ...options, context: ctx }, { port: 0 }); servers.push(running.server)
+    for (const [name, text] of documents) {
+      const response = await fetch(running.url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: `pack://fixture/canon/canon/${name}` } }) })
+      const body = await response.text(), dataLine = body.split('\n').find(line => line.startsWith('data:'))
+      const message = JSON.parse(dataLine ? dataLine.slice(5) : body)
+      expect(message.error).toBeUndefined()
+      expect(message.result.contents[0].text).toBe(text)
+    }
+  })
   it('closes allocated contexts once on explicit server close', async () => {
     const ctx = await context(), closed = vi.spyOn(ctx, 'close')
     vi.spyOn(CreatorContext, 'create').mockResolvedValue(ctx)

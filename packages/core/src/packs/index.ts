@@ -41,20 +41,28 @@ function restrictToFree(pack: LoadedPack): LoadedPack {
 }
 
 export class CanonIndex {
-  private constructor(readonly chunks: CanonChunk[]) {}
+  private constructor(readonly chunks: CanonChunk[], private readonly declaredFiles: Array<{ packId: string; file: string; chunks: number; locked: boolean }>) {}
 
   static async build(merged: MergedPack): Promise<CanonIndex> {
     const chunks: CanonChunk[] = []
+    const files = new Map<string, { packId: string; file: string; chunks: number; locked: boolean }>()
     const lockedFiles = new Set(merged.locked.map(l => path.resolve(l.dir, l.path)))
     for (const entry of merged.canonPaths) {
       for (const file of await resolveCanonFiles(entry.dir, [entry.pattern])) {
-        if (!/\.(md|markdown|txt)$/i.test(file)) continue
         const rel = path.relative(entry.dir, file).split(path.sep).join('/')
+        const key = `${entry.packId}:${rel}`
+        if (files.has(key)) continue
+        const locked = lockedFiles.has(path.resolve(file))
+        const metadata = { packId: entry.packId, file: rel, chunks: 0, locked }
+        files.set(key, metadata)
+        if (!/\.(md|markdown|txt)$/i.test(file)) continue
         const text = await readPackText(entry.dir, rel)
-        chunks.push(...chunkMarkdown(text, entry.packId, rel, lockedFiles.has(path.resolve(file))))
+        const fileChunks = chunkMarkdown(text, entry.packId, rel, locked)
+        metadata.chunks = fileChunks.length
+        chunks.push(...fileChunks)
       }
     }
-    return new CanonIndex(chunks)
+    return new CanonIndex(chunks, [...files.values()])
   }
 
   search(query: string, limit = 8, packId?: string): Array<CanonChunk & { score: number; excerpt: string }> {
@@ -75,14 +83,7 @@ export class CanonIndex {
   }
 
   files(): Array<{ packId: string; file: string; chunks: number; locked: boolean }> {
-    const map = new Map<string, { packId: string; file: string; chunks: number; locked: boolean }>()
-    for (const c of this.chunks) {
-      const key = `${c.packId}:${c.file}`
-      const cur = map.get(key) ?? { packId: c.packId, file: c.file, chunks: 0, locked: c.locked }
-      cur.chunks++
-      map.set(key, cur)
-    }
-    return [...map.values()]
+    return this.declaredFiles.map(file => ({ ...file }))
   }
 }
 
