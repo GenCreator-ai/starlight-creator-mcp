@@ -36,15 +36,46 @@ jobs:
       - run: pnpm run test:release
       - run: pnpm audit --audit-level=moderate
       - run: pnpm run verify:release
-      - run: pnpm run test:consumer
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: creator-release-${{ github.run_id }}-${{ github.sha }}
           path: artifacts/npm-release/
           if-no-files-found: error
           retention-days: 7
-  publish:
+  consume:
     needs: verify
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: windows-latest
+            platform: win32
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: creator-release-${{ github.run_id }}-${{ github.sha }}
+          path: artifacts/npm-release/
+      # Both consumers install the same Linux-built bytes that publication uses.
+      - run: node scripts/test-consumer.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: creator-consumer-${{ matrix.platform }}-${{ github.run_id }}-${{ github.sha }}
+          path: artifacts/npm-release/consumer.json
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: [verify, consume]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: npm-production
@@ -63,6 +94,14 @@ jobs:
         with:
           name: creator-release-${{ github.run_id }}-${{ github.sha }}
           path: artifacts/npm-release/
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: creator-consumer-linux-${{ github.run_id }}-${{ github.sha }}
+          path: artifacts/consumer-linux/
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: creator-consumer-win32-${{ github.run_id }}-${{ github.sha }}
+          path: artifacts/consumer-win32/
       - name: Publish verified bytes through npm OIDC
         run: |
           export NPM_CLI_PATH="$(npm root --global)/npm/bin/npm-cli.js"

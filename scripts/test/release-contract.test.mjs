@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { targets, readTar, validateEntries, validateGraph, validateReceipt, digest, integrity, pnpmInvocation } from '../release-contract.mjs'
-import { assertPublishingContext, registryIntegrity, createNpmRuntime } from '../publish-release.mjs'
+import { assertPublishingContext, registryIntegrity, createNpmRuntime, validateReleaseConsumers, REQUIRED_CONSUMER_CHECKS } from '../publish-release.mjs'
 
 function archive(entries, type = '0') {
   const blocks = []
@@ -30,6 +30,19 @@ function entries(pkg) {
   return result
 }
 const manifest = name => ({ name, version: '0.1.0', license: 'MIT', main: './dist/index.js', types: './dist/index.d.ts' })
+
+test('publication requires both operating systems to consume the same source-bound archive set', () => {
+  const bytes = Buffer.from('reviewed archive-set manifest'), sha = 'a'.repeat(40)
+  const evidence = platform => ({ schemaVersion: 1, status: 'passed', sourceSha: sha, platform, manifestSha256: digest(bytes), checks: [...REQUIRED_CONSUMER_CHECKS] })
+  const valid = { linux: evidence('linux'), win32: evidence('win32') }
+  validateReleaseConsumers(valid, bytes, sha)
+  assert.throws(() => validateReleaseConsumers({ linux: valid.linux }, bytes, sha), /win32/)
+  for (const patch of [{ status: 'failed' }, { platform: 'linux' }, { sourceSha: 'b'.repeat(40) },
+    { manifestSha256: digest(Buffer.from('other Windows build')) }, { checks: [] }, { schemaVersion: 2 }]) {
+    assert.throws(() => validateReleaseConsumers({ ...valid, win32: { ...valid.win32, ...patch } }, bytes, sha), /win32/)
+  }
+  assert.throws(() => validateReleaseConsumers(valid, Buffer.from('replaced manifest'), sha), /linux/)
+})
 
 test('archive parser rejects traversal, links, missing terminator, duplicate members and checksum corruption', () => {
   const item = [['package/../private', Buffer.from('fixture')]]

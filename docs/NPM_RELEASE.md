@@ -58,8 +58,13 @@ advisory coverage, not a proof of vulnerability absence or live provider behavio
 
 ## Publication and recovery
 
-The main-only manual npm-release.yml workflow verifies and installs the artifacts
-before a separate npm-production OIDC job. Publishing requires a clean source-bound
+The main-only manual npm-release.yml workflow builds and verifies one Linux archive
+set, then installs those exact bytes in separate Linux and Windows consumer jobs
+before a separate npm-production OIDC job. Both consumer jobs must succeed. The
+publisher independently requires both platform receipts to match the source revision,
+archive-set manifest digest and complete required check set before any registry or
+publication operation. CI also installs the Linux-built archives on Windows; separate
+Windows builds alone cannot supply this proof. Publishing requires a clean source-bound
 receipt, matching installed-consumer evidence and unchanged tarball digests. All
 existing registry versions are compared by exact integrity before any publication;
 conflicts stop the release. Missing versions publish in dependency order, using

@@ -115,7 +115,7 @@ try {
 } finally { await client.close(); await transport.close(); }
 `)
   run(['protocol.mjs'])
-  const evidence = { schemaVersion: 1, sourceSha, manifestSha256: digest(receiptBytes), status: 'passed',
+  const evidence = { schemaVersion: 1, sourceSha, platform: process.platform, manifestSha256: digest(receiptBytes), status: 'passed',
     checks: ['all-ten-artifact-install', 'optional-s3-omitted-install-and-doctor', 'strict-public-declarations', 'installed-setup-identity', 'doctor-without-provider-keys', 'bundled-starter-discovery', 'installed-init-launch-and-isolation', 'init-existing-config-preserved', 'installed-storage-link-boundary', 'official-stdio-tool-discovery', 'unapproved-publication-denied'] }
   writeFileSync(join(releaseDir, 'consumer.json'), JSON.stringify(evidence, null, 2) + '\n')
   console.log(JSON.stringify(evidence, null, 2))

@@ -4,6 +4,19 @@ import { dirname, join, resolve, isAbsolute, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateReceipt, digest } from './release-contract.mjs'
 
+export const REQUIRED_CONSUMER_CHECKS = ['all-ten-artifact-install', 'optional-s3-omitted-install-and-doctor', 'strict-public-declarations',
+  'installed-setup-identity', 'doctor-without-provider-keys', 'bundled-starter-discovery', 'installed-init-launch-and-isolation',
+  'init-existing-config-preserved', 'installed-storage-link-boundary', 'official-stdio-tool-discovery', 'unapproved-publication-denied']
+
+export function validateReleaseConsumers(consumers, receiptBytes, sourceSha) {
+  for (const platform of ['linux', 'win32']) {
+    const consumer = consumers?.[platform]
+    if (consumer?.schemaVersion !== 1 || consumer.status !== 'passed' || consumer.platform !== platform || consumer.sourceSha !== sourceSha
+      || consumer.manifestSha256 !== digest(receiptBytes) || !Array.isArray(consumer.checks)
+      || !REQUIRED_CONSUMER_CHECKS.every(name => consumer.checks.includes(name))) throw new Error(`Installed-consumer evidence mismatch for ${platform}`)
+  }
+}
+
 export function assertPublishingContext(env, sourceSha) {
   if (env.GITHUB_ACTIONS !== 'true' || env.GITHUB_REPOSITORY !== 'frankxai/starlight-creator-mcp' || env.GITHUB_REF !== 'refs/heads/main'
     || env.GITHUB_EVENT_NAME !== 'workflow_dispatch'
@@ -62,9 +75,10 @@ export async function publishRelease(root = resolve(dirname(fileURLToPath(import
   if (!Array.isArray(receipt.packages) || receipt.packages.some(row => !/^[a-z0-9.-]+\.tgz$/.test(row.file))) throw new Error('Invalid receipt artifact path')
   const files = new Map(receipt.packages.map(row => [row.file, readFileSync(join(directory, row.file))]))
   validateReceipt(receipt, files, sourceSha)
-  const consumer = JSON.parse(readFileSync(join(directory, 'consumer.json')))
-  if (consumer.status !== 'passed' || consumer.sourceSha !== sourceSha || consumer.manifestSha256 !== digest(receiptBytes)
-    || !['all-ten-artifact-install', 'optional-s3-omitted-install-and-doctor', 'strict-public-declarations', 'installed-init-launch-and-isolation', 'init-existing-config-preserved', 'installed-storage-link-boundary', 'official-stdio-tool-discovery', 'unapproved-publication-denied'].every(name => consumer.checks?.includes(name))) throw new Error('Installed-consumer evidence mismatch')
+  validateReleaseConsumers({
+    linux: JSON.parse(readFileSync(join(root, 'artifacts', 'consumer-linux', 'consumer.json'))),
+    win32: JSON.parse(readFileSync(join(root, 'artifacts', 'consumer-win32', 'consumer.json'))),
+  }, receiptBytes, sourceSha)
   const npmCli = process.env.NPM_CLI_PATH
   if (!npmCli || !isAbsolute(npmCli) || basename(npmCli) !== 'npm-cli.js' || !existsSync(npmCli)) throw new Error('Pinned npm CLI required')
   const pending = []
