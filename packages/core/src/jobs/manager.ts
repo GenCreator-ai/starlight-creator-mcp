@@ -103,9 +103,11 @@ export class JobManager {
     const rows: AssetRow[] = []
     let text: string | undefined
     try {
+      if (!result.outputs.length) throw new Error('provider returned no recoverable output')
       for (const out of result.outputs) {
         const bytes = out.kind === 'text' && typeof out.text === 'string' ? Buffer.from(out.text, 'utf8') : out.bytes ?? (out.url ? await this.download(out.url, job.provider) : null)
-        if (!bytes) continue
+        if (!bytes) throw new Error('provider output has no bytes, text or URL')
+        if (!bytes.byteLength) throw new Error('provider returned empty output bytes')
         if (bytes.byteLength > this.o.maxAssetBytes) throw new Error('provider output exceeds byte limit')
         if (out.kind === 'text' && text === undefined) text = Buffer.from(bytes).toString('utf8')
         const prov = (job.request as { provenance?: SubmitInput['provenance'] }).provenance ?? {}

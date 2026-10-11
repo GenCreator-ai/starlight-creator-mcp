@@ -163,4 +163,17 @@ describe('provider output egress and durable retrieval', () => {
       expect(f.submit).toHaveBeenCalledTimes(1)
     } finally { f.ledger.close() }
   })
+  it.each([
+    { name: 'no outputs', outputs: [] },
+    { name: 'empty bytes', outputs: [{ kind: 'video' as const, mime: 'video/mp4', bytes: new Uint8Array() }] },
+    { name: 'no bytes or URL', outputs: [{ kind: 'video' as const, mime: 'video/mp4' }] },
+  ])('rejects a provider completion with $name', async ({ outputs }) => {
+    const f = await outputFixture()
+    f.poll.mockResolvedValueOnce({ providerJobId: 'durable-provider-job', status: 'completed', result: { outputs }, costUsd: 0.5 })
+    try {
+      expect(await f.manager.refresh(f.job.id)).toMatchObject({ status: 'failed', costUsd: 0.5, error: expect.stringMatching(/^result ingest failed:/) })
+      expect(f.ledger.listAssets({}).assets).toHaveLength(0)
+      expect(f.submit).toHaveBeenCalledTimes(1)
+    } finally { f.ledger.close() }
+  })
 })
