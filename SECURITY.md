@@ -35,6 +35,7 @@ The MCP client (Claude, Cursor, Antigravity, Codex) is the principal. The substr
 - Confirmation is supplied by the MCP client's elicitation channel or the local CLI. The server authenticates the resulting manifest with HMAC; it does not independently attest that a human supplied the confirmation. A compromised or automated client can return a matching code. Hosts must keep approval entry separate from untrusted agent execution before treating this as an independent human approval boundary.
 
 ## Licenses
+- A private pack without a license retains only its declared free sections. Excluding canon also removes locked-document and entity-index references from MCP exposure. This is application behavior, not encryption or a tenant security boundary; an operator who already has the pack files can read them directly.
 - Polar keys are validated from the user's machine against the public customer-portal endpoint. Offline use is allowed for 14 days after a *successful online* validation of the same key fingerprint; the cache is MAC-signed so editing it does not unlock anything. There are no length or prefix heuristics.
 
 ## Reporting

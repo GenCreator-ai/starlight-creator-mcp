@@ -26,7 +26,11 @@ export async function loadPacks(dirs: string[], substrateVersion: string, opts: 
 function restrictToFree(pack: LoadedPack): LoadedPack {
   const free = new Set(pack.manifest.offer?.free ?? [])
   const m = { ...pack.manifest }
-  if (!free.has('canon')) m.canon = { ...m.canon, paths: [], forbiddenPatterns: m.canon.forbiddenPatterns }
+  if (!free.has('canon')) {
+    m.canon = { ...m.canon, paths: [] }
+    delete m.canon.locked
+    delete m.canon.entities
+  }
   if (!free.has('rubrics')) m.rubrics = []
   if (!free.has('templates')) m.templates = []
   if (!free.has('prompts')) m.prompts = []
