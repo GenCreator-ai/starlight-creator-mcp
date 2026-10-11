@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compilePackPattern, PackPatternError } from './pattern.js'
+import { compilePackPattern, PackPatternBudget, PackPatternError } from './pattern.js'
 import { validatePackDir } from './validate.js'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -36,10 +36,30 @@ describe('bounded pack patterns', () => {
   it('bounds comparisons for a long nearly-matching literal', () => {
     expect(() => [...compilePackPattern('a'.repeat(480) + 'b')('a'.repeat(65_536))]).toThrow(/work budget/)
   })
-  it('shares the work budget across a full canon rule collection', () => {
+  it('checks a maximum-size input against 256 impossible canon rules without repeated full scans', () => {
     const merged = mergePacks([], '0.1.0')
-    merged.forbiddenPatterns = Array.from({ length: 16 }, () => ({ packId: 'test', pattern: 'x', message: 'not allowed' }))
+    merged.forbiddenPatterns = Array.from({ length: 256 }, () => ({ packId: 'test', pattern: 'x', message: 'not allowed' }))
+    expect(lintText('a'.repeat(65_536), merged)).toEqual({ ok: true, findings: [], unknownEntities: [] })
+  })
+  it('still shares the cap for a costly collection of near-matches', () => {
+    const merged = mergePacks([], '0.1.0')
+    merged.forbiddenPatterns = Array.from({ length: 16 }, () => ({ packId: 'test', pattern: 'aaaaab', message: 'not allowed' }))
     expect(() => lintText('a'.repeat(65_536), merged)).toThrow(/work budget/)
+  })
+  it('preserves ordered alternatives and nonoverlapping matches with a shared input index', () => {
+    const patterns = ['b|a', 'a|aa', 'aa|a', '\\b(logo|typograph\\w*)\\b', '11th\\s+gate|gate\\s+11', 'a b|b a', 'z|logo']
+    const text = 'b aa a logo LOGOTYPE typography gate  11 and 11th\tGATE a b b a z logo'
+    const budget = new PackPatternBudget()
+    for (const pattern of patterns) {
+      const expected = [...text.matchAll(new RegExp(pattern, 'gi'))].map(match => ({ index: match.index, text: match[0] }))
+      expect([...compilePackPattern(pattern)(text, budget)], pattern).toEqual(expected)
+    }
+  })
+  it('does not reuse a stale input index when a budget sees different text', () => {
+    const budget = new PackPatternBudget(), matcher = compilePackPattern('logo')
+    expect([...matcher('nothing', budget)]).toEqual([])
+    expect([...matcher('a LOGO', budget)]).toEqual([{ index: 2, text: 'LOGO' }])
+    expect([...matcher('nothing', budget)]).toEqual([])
   })
   it('rejects excessive intent and forbidden-pattern collections at manifest parsing', () => {
     expect(registryOverridesSchema.safeParse({ intents: Array.from({ length: 257 }, () => ({ id: 'test', task: 't2i', pattern: 'x', preferenceKey: 't2i:high' })) }).success).toBe(false)

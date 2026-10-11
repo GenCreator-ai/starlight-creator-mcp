@@ -15,8 +15,11 @@ word suffix per alternative. For example, `\b(logo|typograph\w*)\b` matches
 logo and typography; `11th\s+gate|gate\s+11` matches either canon phrase.
 Patterns allow at most 512 characters and input at most 65,536 characters.
 Each manifest permits at most 256 intents and 256 forbidden patterns. Matching
-has a conservative 1,000,000-unit work budget: input normalization, scanning,
-possible literal comparisons and suffix/gap walks are charged. Routing and canon
+has a conservative 1,000,000-unit work budget: input normalization/indexing,
+candidate selection, possible literal comparisons and suffix/gap walks are charged.
+Each request budget caches one bounded ASCII-normalized input and character-position
+index. Rules share it and only examine possible first-character positions, so
+impossible rules do not each scan the full text. Routing and canon
 linting share that budget across all their rules and fail with `PackPatternError`
 when exhausted, rather than reporting an incomplete check as successful. Direct
 matcher callers can pass one `PackPatternBudget` across a collection. Long inputs

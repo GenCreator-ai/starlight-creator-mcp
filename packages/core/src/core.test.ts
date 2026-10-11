@@ -60,8 +60,12 @@ describe('best-of loop', () => {
 })
 
 describe('router', () => {
-  it('shares a work budget across nonmatching routing intents', () => {
-    const m = merged({ intents: Array.from({ length: 16 }, (_, i) => ({ id: `rule-${i}`, task: 't2i', pattern: 'x', preferenceKey: 't2i:high' })) })
+  it('uses the normal route after 256 impossible intents on a maximum-size prompt', () => {
+    const m = merged({ intents: Array.from({ length: 256 }, (_, i) => ({ id: `rule-${i}`, task: 't2i', pattern: 'x', preferenceKey: 't2i:high' })) })
+    expect(routeModel(models, m.registry, { task: 't2i', quality: 'high', prompt: 'a'.repeat(65_536) }).model).toEqual(models[0])
+  })
+  it('fails rather than silently routing when near-matches exhaust the shared cap', () => {
+    const m = merged({ intents: Array.from({ length: 16 }, (_, i) => ({ id: `rule-${i}`, task: 't2i', pattern: 'aaaaab', preferenceKey: 't2i:high' })) })
     expect(() => routeModel(models, m.registry, { task: 't2i', quality: 'high', prompt: 'a'.repeat(65_536) })).toThrow(/work budget/)
   })
   it('uses pack preferences, intents and pins', () => {
