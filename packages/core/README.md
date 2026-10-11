@@ -8,4 +8,6 @@ Provider interface and registry, pack-driven model routing, the best-of-N taste 
 
 Part of the [Starlight creator substrate](https://github.com/frankxai/starlight-creator-mcp). BYOK and local-first: provider keys stay in the user's OS keychain and generated media stays on their machine.
 
+Provider output hosts require an explicit provider or operator allowlist entry. Output URLs do not expand that list. If result retrieval or storage fails, the durable ledger keeps the original provider job ID. Correct the configuration, reopen the context, then call `context.jobs.retryIngest(jobId)` to poll that job and ingest its output again without submitting another generation. Normal `refresh` leaves terminal failures unchanged. Recovery depends on the provider still retaining the output; polling may have provider-specific charges.
+
 MIT.

@@ -79,6 +79,25 @@ export class JobManager {
     return job
   }
 
+  /** Explicitly retrieve an existing provider job again; never submit generation. */
+  async retryIngest(jobId: string): Promise<JobRecord | null> {
+    const job = this.o.ledger.getJob(jobId)
+    if (!job || job.status !== 'failed' || !job.providerJobId || !job.error?.startsWith('result ingest failed:')) return job
+    const provider = this.o.providers.get(job.provider)
+    let pj: ProviderJob
+    try {
+      pj = await provider.poll(job.providerJobId, job.task)
+    } catch (err) {
+      return this.o.ledger.updateJob(jobId, { error: `result ingest failed: retrieval poll failed: ${(err as Error).message}` })
+    }
+    if (pj.status === 'failed' || pj.status === 'cancelled') return this.o.ledger.updateJob(jobId, { status: pj.status, error: pj.error ?? `provider reported ${pj.status}` })
+    if (pj.status === 'completed') {
+      if (pj.result) return this.ingestResult(job, pj)
+      return this.o.ledger.updateJob(jobId, { error: 'result ingest failed: provider returned no result' })
+    }
+    return this.o.ledger.updateJob(jobId, { status: pj.status, error: undefined })
+  }
+
   private async ingestResult(job: JobRecord, pj: ProviderJob): Promise<JobRecord> {
     const result = pj.result as ProviderResult
     const rows: AssetRow[] = []
@@ -109,11 +128,11 @@ export class JobManager {
         }))
       }
     } catch (err) {
-      return this.o.ledger.updateJob(job.id, { status: 'failed', error: `result ingest failed: ${(err as Error).message}` })!
+      return this.o.ledger.updateJob(job.id, { status: 'failed', error: `result ingest failed: ${(err as Error).message}`, ...(pj.costUsd !== undefined ? { costUsd: pj.costUsd } : result.costUsd !== undefined ? { costUsd: result.costUsd } : {}) })!
     }
     const first = rows[0]
     return this.o.ledger.updateJob(job.id, {
-      status: 'completed', ...(first ? { resultSha256: first.sha256 } : {}), candidates: rows.map(r => ({ sha256: r.sha256 })),
+      status: 'completed', error: undefined, ...(first ? { resultSha256: first.sha256 } : {}), candidates: rows.map(r => ({ sha256: r.sha256 })),
       ...(pj.costUsd !== undefined ? { costUsd: pj.costUsd } : result.costUsd !== undefined ? { costUsd: result.costUsd } : {}), ...(text ? { request: { ...job.request, result_text: text } } : {}),
     })!
   }
@@ -121,7 +140,7 @@ export class JobManager {
   private async download(url: string, providerId: string): Promise<Uint8Array> {
     const provider = this.o.providers.get(providerId)
     const host = new URL(url).hostname
-    const policy: FetchPolicy = { ...this.o.fetchPolicy, allowHosts: [...this.o.fetchPolicy.allowHosts, ...provider.allowHosts, host], maxBytes: this.o.maxAssetBytes, timeoutMs: 120_000 }
+    const policy: FetchPolicy = { ...this.o.fetchPolicy, allowHosts: [...this.o.fetchPolicy.allowHosts, ...provider.allowHosts], maxBytes: this.o.maxAssetBytes, timeoutMs: 120_000 }
     const res = await guardedFetch(url, { policy })
     if (!res.ok) {
       await discardBody(res)

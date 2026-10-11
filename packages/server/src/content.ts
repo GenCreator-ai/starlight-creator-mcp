@@ -24,7 +24,9 @@ export function scoreOutOf(s: Score): ScoreOut {
 
 export function jobOutOf(ctx: CreatorContext, job: JobRecord, extra: Partial<JobOut> = {}): JobOut {
   const asset = job.resultSha256 ? ctx.ledger.getAsset(job.resultSha256) : null
-  const nextStep = job.status === 'queued' || job.status === 'running' ? `call creator_job_status with job_id ${job.id}` : job.status === 'failed' ? 'adjust the prompt or model and retry; creator_models lists alternatives' : undefined
+  const nextStep = job.status === 'queued' || job.status === 'running' ? `call creator_job_status with job_id ${job.id}`
+    : job.status === 'failed' && job.providerJobId && job.error?.startsWith('result ingest failed:') ? `correct the retrieval or storage error, explicitly configure any verified media host and restart the context, then call creator_job_status with job_id ${job.id} and retry_ingest true; this submits no new generation`
+      : job.status === 'failed' ? 'adjust the prompt or model and retry; creator_models lists alternatives' : undefined
   return {
     job_id: job.id, status: job.status, ...(asset ? { asset: summarizeAsset(ctx, asset) } : {}), ...(job.score ? { score: scoreOutOf(job.score) } : {}),
     ...(job.candidates?.length ? { candidates: job.candidates } : {}), ...(job.route ? { route: job.route } : {}), ...(job.costUsd !== undefined ? { cost_usd: job.costUsd } : {}),

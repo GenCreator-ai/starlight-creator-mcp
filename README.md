@@ -35,6 +35,8 @@ Providers in this tree: **OpenRouter** (text, images, async video), **MuAPI** (2
 
 Storage: **local** (default, always on), **S3-compatible** (AWS S3, Cloudflare R2, MinIO — `setup --storage`), **rclone** (any remote it supports). S3 endpoints, including AWS, must be listed explicitly in `policy.allowHosts`; a configured bucket fails closed if the optional connector was omitted (`--omit=optional`) or its credentials are missing. Publishing media needs a connector that can produce a public URL, so local-only installs can generate and score but not attach images to posts.
 
+Provider output URLs also require an approved host. If a job reports `result ingest failed`, correct the retrieval/storage error, add only a verified media host to `policy.allowHosts` if needed, and restart the MCP server to reload the configuration. Call `creator_job_status` with the same `job_id` and `retry_ingest: true` to retrieve the existing provider job again. This submits no new generation. Recovery depends on provider retention and URL validity; polling may carry provider-specific charges. Ordinary status calls leave a failed job unchanged.
+
 ## Tools
 
 `creator_models` · `creator_generate_image` · `creator_generate_video` · `creator_generate_audio` · `creator_job_status` · `creator_score` · `creator_assets` · `creator_asset_sync` · `creator_pack_info` · `creator_publication_prepare` · `creator_publication_approve` · `creator_publish` · `creator_metrics_ingest` · `creator_metrics_query` · `creator_license_status`
