@@ -23,7 +23,8 @@ function isPrivateIPv4(ip: string): boolean {
 function isPrivateIPv6(ip: string): boolean {
   let low = ip.toLowerCase()
   try { low = new URL(`http://[${low}]`).hostname.slice(1, -1) } catch { /* Scoped link-local addresses are handled by their prefix. */ }
-  return low === '::1' || low === '::' || low.startsWith('fc') || low.startsWith('fd') || /^fe[89ab]/.test(low) || low.startsWith('ff') || low.startsWith('::ffff:')
+  // Deny the entire compatible/mapped range, including normalized IPv4 tails.
+  return low.startsWith('::') || low.startsWith('fc') || low.startsWith('fd') || /^fe[89ab]/.test(low) || low.startsWith('ff')
 }
 
 export function isPrivateHost(host: string): boolean {

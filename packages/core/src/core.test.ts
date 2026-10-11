@@ -68,6 +68,10 @@ describe('router', () => {
     const pinned = merged({ pins: { t2i: 'muapi/flux-schnell' } })
     expect(routeModel(models, pinned.registry, { task: 't2i', quality: 'high' }).reason).toContain('pin')
   })
+  it('fails closed on a hostile pack intent without executing its regex', () => {
+    const m = merged({ intents: [{ id: 'hostile', task: 't2i', pattern: '(a+)+b', preferenceKey: 't2i:high' }] })
+    expect(() => routeModel(models, m.registry, { task: 't2i', quality: 'high', prompt: 'a'.repeat(1000) })).toThrow(/unsupported pack pattern/)
+  })
   it('honours deny lists and rejects unknown explicit models', () => {
     const m = merged({ deny: ['muapi/nano-banana-pro'], preferences: { 't2i:high': ['nano-banana-pro'] } })
     expect(routeModel(models, m.registry, { task: 't2i', quality: 'high' }).model.id).not.toBe('muapi/nano-banana-pro')

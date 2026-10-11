@@ -1,4 +1,4 @@
-import type { RegistryOverrides } from '@starlight-intelligence/creator-packs-spec'
+import { compilePackPattern, type RegistryOverrides } from '@starlight-intelligence/creator-packs-spec'
 import type { ModelRecord, Quality, Task } from '../types.js'
 
 export interface RouteInput {
@@ -45,7 +45,7 @@ export function routeModel(models: ModelRecord[], registry: RegistryOverrides, i
   if (input.prompt) {
     for (const intent of registry.intents) {
       if (intent.task !== input.task) continue
-      if (new RegExp(intent.pattern, 'i').test(input.prompt)) { key = intent.preferenceKey; break }
+      if (!compilePackPattern(intent.pattern)(input.prompt)[Symbol.iterator]().next().done) { key = intent.preferenceKey; break }
     }
   }
   const prefs = registry.preferences[key] ?? registry.preferences[`${input.task}:${input.quality}`] ?? []

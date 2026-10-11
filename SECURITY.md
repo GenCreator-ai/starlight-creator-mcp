@@ -19,6 +19,10 @@ The MCP client (Claude, Cursor, Antigravity, Codex) is the principal. The substr
 - Local asset and provenance reads/writes resolve existing parent directories before access, including when the destination has not been created. Outward symbolic links/junctions are denied. Temporary writes use unique names and exclusive creation before rename. These path checks are not a race-proof OS sandbox: operators must protect the storage root and its parents from concurrent untrusted filesystem mutation.
 - No shell strings. `rclone` is invoked with `execFile` and an argument array.
 
+## Pack data
+- Rubric prompt reads apply both lexical and real-path containment at the point of use, including direct `TasteScorer` calls. Outward directory links are denied. This shares the filesystem mutation limitation above.
+- Routing intents and canon forbidden patterns use a bounded literal matcher. Supported syntax is case-insensitive ASCII literals, up to 32 `|` alternatives, one optional outer group, optional outer `\b` boundaries, `\s+` gaps between nonempty literals, and a final `\w*` suffix per alternative. Patterns are limited to 512 characters and matched input to 65,536 characters. Other regex syntax is rejected by directory validation and at runtime; packs using arbitrary regular expressions must migrate. The shipped starter routing pattern and canon whitespace-gap tests retain their behavior. No pack pattern is passed to `RegExp`.
+
 ## Publishing
 - `creator_publication_prepare` computes a canonical payload hash; `creator_publication_approve` requires the human to type the first 8 characters of that hash through an elicitation form (or the `creator-mcp approve` terminal command). The manifest is then HMAC-SHA256 signed with a key that lives in the vault.
 - `creator_publish` verifies signature, expiry (≤ 14 days), recomputed hash and asset bytes before sending; channel sends are idempotent by `sha256(payload_hash | channel | adapter)`; a per-adapter hourly limit is enforced locally.

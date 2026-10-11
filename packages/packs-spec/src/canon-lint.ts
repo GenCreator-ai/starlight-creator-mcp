@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { MergedPack } from './merge.js'
+import { compilePackPattern } from './pattern.js'
 
 export interface CanonFinding { packId: string; pattern: string; message: string; excerpt: string; index: number }
 export interface CanonLintResult { ok: boolean; findings: CanonFinding[]; unknownEntities: string[] }
@@ -28,10 +29,9 @@ export async function loadEntities(merged: MergedPack): Promise<EntityIndex> {
 export function lintText(text: string, merged: MergedPack, entities?: EntityIndex): CanonLintResult {
   const findings: CanonFinding[] = []
   for (const fp of merged.forbiddenPatterns) {
-    const re = new RegExp(fp.pattern, 'gi')
-    for (const match of text.matchAll(re)) {
-      const start = Math.max(0, (match.index ?? 0) - 40)
-      findings.push({ packId: fp.packId, pattern: fp.pattern, message: fp.message, excerpt: text.slice(start, (match.index ?? 0) + match[0].length + 40).replace(/\s+/g, ' '), index: match.index ?? 0 })
+    for (const match of compilePackPattern(fp.pattern)(text)) {
+      const start = Math.max(0, match.index - 40)
+      findings.push({ packId: fp.packId, pattern: fp.pattern, message: fp.message, excerpt: text.slice(start, match.index + match.text.length + 40).replace(/\s+/g, ' '), index: match.index })
     }
   }
   const unknownEntities: string[] = []

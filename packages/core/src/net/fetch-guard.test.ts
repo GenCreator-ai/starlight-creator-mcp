@@ -14,7 +14,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.mocked(lookup).mockReset() })
 
 describe('guarded redirect requests', () => {
   it('rejects equivalent IPv6 private addresses and non-unicast destinations', () => {
-    for (const address of ['0:0:0:0:0:0:0:1', '0:0:0:0:0:ffff:7f00:1', 'fe90::1', 'fea0::1', 'feb0::1', 'ff02::1', '224.0.0.1', '255.255.255.255']) {
+    for (const address of ['::127.0.0.1', '::169.254.169.254', '::7f00:1', '::a9fe:a9fe', '0:0:0:0:0:0:7f00:1', '0:0:0:0:0:0:0:1', '0:0:0:0:0:ffff:7f00:1', 'fe90::1', 'fea0::1', 'feb0::1', 'ff02::1', '224.0.0.1', '255.255.255.255']) {
       expect(isPrivateHost(address), address).toBe(true)
     }
     expect(isPrivateHost('2606:4700:4700::1111')).toBe(false)

@@ -2,6 +2,7 @@ import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import * as z from 'zod/v4'
 import { compositeToolSchema, packManifestSchema, type PackManifest } from './schema.js'
+import { compilePackPattern } from './pattern.js'
 
 export interface PackIssue { level: 'error' | 'warning'; path: string; message: string }
 export interface PackValidation { ok: boolean; manifest?: PackManifest; issues: PackIssue[] }
@@ -62,11 +63,11 @@ export async function validatePackDir(dir: string): Promise<PackValidation> {
   for (const r of m.rubrics) if (r.default) defaultsByKind.set(r.kind, (defaultsByKind.get(r.kind) ?? 0) + 1)
   for (const [kind, n] of defaultsByKind) if (n > 1) issues.push({ level: 'error', path: 'rubrics', message: `${n} default rubrics for kind ${kind}; at most one allowed` })
   for (const intent of m.registry.intents) {
-    try { new RegExp(intent.pattern, 'i') } catch { issues.push({ level: 'error', path: `registry.intents.${intent.id}`, message: 'pattern is not a valid regular expression' }) }
+    try { compilePackPattern(intent.pattern) } catch (error) { issues.push({ level: 'error', path: `registry.intents.${intent.id}`, message: (error as Error).message }) }
     if (!(intent.preferenceKey in m.registry.preferences)) issues.push({ level: 'warning', path: `registry.intents.${intent.id}`, message: `preferenceKey ${intent.preferenceKey} has no preference list in this pack (may come from another pack)` })
   }
   for (const fp of m.canon.forbiddenPatterns) {
-    try { new RegExp(fp.pattern, 'i') } catch { issues.push({ level: 'error', path: 'canon.forbiddenPatterns', message: `invalid pattern: ${fp.pattern}` }) }
+    try { compilePackPattern(fp.pattern) } catch (error) { issues.push({ level: 'error', path: 'canon.forbiddenPatterns', message: (error as Error).message }) }
   }
   if (m.publishing.requireRubric && !m.rubrics.some(r => r.id === m.publishing.requireRubric)) issues.push({ level: 'warning', path: 'publishing.requireRubric', message: `rubric ${m.publishing.requireRubric} not defined in this pack` })
   if (!m.publicSafe && !m.entitlement) issues.push({ level: 'warning', path: 'entitlement', message: 'pack is not publicSafe but declares no entitlement; it will only load with CREATOR_DEV=1' })
