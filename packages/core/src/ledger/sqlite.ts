@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS metric_observations (id TEXT PRIMARY KEY, publication
 CREATE INDEX IF NOT EXISTS observations_publication ON metric_observations(publication_id, observed_at DESC);
 CREATE TABLE IF NOT EXISTS rate_limits (adapter TEXT, at TEXT);
 CREATE INDEX IF NOT EXISTS rate_limits_adapter ON rate_limits(adapter, at);
+CREATE INDEX IF NOT EXISTS rate_limits_time ON rate_limits(at);
 `
 
 interface SqliteDatabase {
@@ -67,6 +68,7 @@ export function assetPageLimit(limit: number): number {
 }
 
 export const MAX_OBSERVATIONS = 10000
+export function rateHitCutoff(): string { return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() }
 export function observationBudget<T>(rows: T[]): T[] {
   if (rows.length > MAX_OBSERVATIONS) throw new RangeError('metric query exceeds 10000 observations; narrow the publication or time window')
   return rows
@@ -197,9 +199,17 @@ export class SqliteLedger implements Ledger {
     return observationBudget(this.rows<MetricObservation>(`SELECT json FROM metric_observations ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY observed_at DESC LIMIT ?`, ...args, MAX_OBSERVATIONS + 1))
   }
 
-  recordHit(adapter: string, at: string): void { this.db.prepare('INSERT INTO rate_limits (adapter, at) VALUES (?,?)').run(adapter, at) }
+  recordHit(adapter: string, at: string): void {
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.db.prepare('DELETE FROM rate_limits WHERE at < ?').run(rateHitCutoff())
+      this.db.prepare('INSERT INTO rate_limits (adapter, at) VALUES (?,?)').run(adapter, at)
+      this.db.exec('COMMIT')
+    } catch (error) { this.db.exec('ROLLBACK'); throw error }
+  }
   hitsSince(adapter: string, since: string): number {
-    const r = this.db.prepare('SELECT COUNT(*) AS n FROM rate_limits WHERE adapter = ? AND at >= ?').get(adapter, since) as { n: number }
+    const cutoff = rateHitCutoff()
+    const r = this.db.prepare('SELECT COUNT(*) AS n FROM rate_limits WHERE adapter = ? AND at >= ?').get(adapter, since > cutoff ? since : cutoff) as { n: number }
     return Number(r.n)
   }
 

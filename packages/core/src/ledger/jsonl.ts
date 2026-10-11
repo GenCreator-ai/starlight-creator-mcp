@@ -3,7 +3,7 @@ import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import type { JobRecord } from '../types.js'
 import type { AssetFilter, AssetRow, Ledger, ManifestRow, MetricObservation, PublicationRow, ScoreRow } from './interface.js'
-import { matchesAssetFilter, observationBudget, paginate } from './sqlite.js'
+import { matchesAssetFilter, observationBudget, paginate, rateHitCutoff } from './sqlite.js'
 
 type Op = { t: 'asset'; r: AssetRow } | { t: 'loc'; r: { sha256: string; connector: string; uri: string; syncedAt: string } } | { t: 'job'; r: JobRecord } | { t: 'score'; r: ScoreRow } | { t: 'manifest'; r: ManifestRow } | { t: 'pub'; r: PublicationRow } | { t: 'obs'; r: MetricObservation } | { t: 'hit'; r: { adapter: string; at: string } }
 
@@ -53,6 +53,7 @@ export class JsonlLedger implements Ledger {
           if (Buffer.byteLength(pending) > this.maxRecordBytes) throw new RangeError('JSONL record exceeds byte budget')
         }
         consume(pending + decoder.end())
+        this.pruneHits()
       } finally { closeSync(fd) }
     }
   }
@@ -119,7 +120,8 @@ export class JsonlLedger implements Ledger {
   observations(filter: { publicationId?: string; since?: string; until?: string }): MetricObservation[] {
     return observationBudget([...this.obs.values()].filter(o => (!filter.publicationId || o.publicationId === filter.publicationId) && (!filter.since || o.observedAt >= filter.since) && (!filter.until || o.observedAt <= filter.until))).sort((a, b) => b.observedAt.localeCompare(a.observedAt))
   }
-  recordHit(adapter: string, at: string): void { this.apply({ t: 'hit', r: { adapter, at } }) }
-  hitsSince(adapter: string, since: string): number { return this.hits.filter(h => h.adapter === adapter && h.at >= since).length }
+  private pruneHits(): void { const cutoff = rateHitCutoff(); this.hits = this.hits.filter(h => h.at >= cutoff) }
+  recordHit(adapter: string, at: string): void { this.apply({ t: 'hit', r: { adapter, at } }); this.pruneHits() }
+  hitsSince(adapter: string, since: string): number { this.pruneHits(); return this.hits.filter(h => h.adapter === adapter && h.at >= since).length }
   close(): void { /* nothing to flush */ }
 }

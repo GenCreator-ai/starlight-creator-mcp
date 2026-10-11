@@ -53,6 +53,17 @@ describe.each(['jsonl', 'sqlite'] as const)('%s asset query semantics', backend 
       expect(ledger.observations({ publicationId: 'wanted' })).toHaveLength(1)
     } finally { ledger.close() }
   })
+  it('retains recent throttle hits and excludes expired hits from historical queries', () => {
+    const ledger = open(), now = Date.now()
+    try {
+      ledger.recordHit('fixture', new Date(now - 36 * 60 * 60 * 1000).toISOString())
+      ledger.recordHit('fixture', new Date(now - 30 * 60 * 1000).toISOString())
+      ledger.recordHit('other', new Date(now - 20 * 60 * 1000).toISOString())
+      expect(ledger.hitsSince('fixture', new Date(now - 48 * 60 * 60 * 1000).toISOString())).toBe(1)
+      expect(ledger.hitsSince('fixture', new Date(now - 60 * 60 * 1000).toISOString())).toBe(1)
+      expect(ledger.hitsSince('other', new Date(now - 60 * 60 * 1000).toISOString())).toBe(1)
+    } finally { ledger.close() }
+  })
 })
 
 it('SQLite applies filters and pagination before decoding unrelated rows', async () => {
@@ -106,5 +117,14 @@ describe('bounded JSONL replay and append', () => {
     await writeFile(file, bytes)
     expect(() => new JsonlLedger(file)).toThrow(/invalid JSON/)
     expect(await readFile(file, 'utf8')).toBe(bytes)
+  })
+  it('prunes expired throttle state on reopen while preserving the append-only file', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'creator-ledger-hits-')); roots.push(root)
+    const file = path.join(root, 'ledger.jsonl'), ledger = new JsonlLedger(file), now = Date.now()
+    ledger.recordHit('fixture', new Date(now - 36 * 60 * 60 * 1000).toISOString())
+    ledger.recordHit('fixture', new Date(now - 30 * 60 * 1000).toISOString()); ledger.close()
+    const before = await readFile(file), reopened = new JsonlLedger(file)
+    expect(reopened.hitsSince('fixture', new Date(now - 48 * 60 * 60 * 1000).toISOString())).toBe(1)
+    expect(await readFile(file)).toEqual(before); reopened.close()
   })
 })
