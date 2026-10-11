@@ -74,8 +74,10 @@ export function createOpenRouterProvider(opts: OpenRouterProviderOptions): Provi
     async poll(providerJobId: string): Promise<ProviderJob> {
       if (providerJobId.startsWith('inline-')) return { providerJobId, status: 'completed', result: { outputs: [] } }
       const data = await json<{ status: string; unsigned_urls?: string[]; usage?: { cost?: number; is_byok?: boolean }; error?: { message?: string } | string }>(`${base}/api/v1/videos/${encodeURIComponent(providerJobId)}`, { method: 'GET' })
-      if (data.status === 'failed') return { providerJobId, status: 'failed', error: typeof data.error === 'string' ? data.error : data.error?.message ?? 'video generation failed' }
-      if (data.status !== 'completed') return { providerJobId, status: data.status === 'pending' ? 'queued' : 'running' }
+      if (['failed', 'cancelled', 'expired'].includes(data.status)) return { providerJobId, status: data.status === 'cancelled' ? 'cancelled' : 'failed', error: typeof data.error === 'string' ? data.error : data.error?.message ?? `video generation ${data.status}` }
+      if (data.status === 'pending') return { providerJobId, status: 'queued' }
+      if (data.status === 'in_progress') return { providerJobId, status: 'running' }
+      if (data.status !== 'completed') throw new ProviderError(`unexpected openrouter video status: ${data.status}`, 'openrouter')
       const urls = data.unsigned_urls?.length ? data.unsigned_urls : [`${base}/api/v1/videos/${encodeURIComponent(providerJobId)}/content`]
       // OpenRouter content endpoints are authenticated; never send this key to a returned external origin.
       for (const url of urls) if (new URL(url).origin !== new URL(base).origin) throw new ProviderError('openrouter video content origin differs from API origin', 'openrouter')
@@ -85,7 +87,7 @@ export function createOpenRouterProvider(opts: OpenRouterProviderOptions): Provi
         const res = await guardedFetch(url, { headers: { Authorization: auth.Authorization }, policy: { ...policy, maxBytes: 512 * 1024 * 1024 } })
         if (!res.ok) {
           await discardBody(res)
-          throw new ProviderError(`openrouter video download ${res.status}`, 'openrouter', res.status >= 500, res.status)
+          throw new ProviderError(`openrouter video download ${res.status}`, 'openrouter', res.status === 429 || res.status >= 500, res.status)
         }
         outputs.push({ bytes: new Uint8Array(await res.arrayBuffer()), mime: res.headers.get('content-type')?.split(';')[0] ?? 'video/mp4', kind: 'video' as const })
       }

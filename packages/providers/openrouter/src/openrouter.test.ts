@@ -68,6 +68,12 @@ describe('OpenRouter releases unread error bodies', () => {
     expect((await createOpenRouterProvider({ vault, baseUrl: base, fetchPolicy: { allowHosts: [], allowPrivateHosts: true } }).poll('vid', 't2v')).result?.outputs).toHaveLength(1)
     expect(authorized).toBe(true)
   })
+  it.each(['failed', 'expired', 'cancelled'])('stops polling a terminal %s video job', async status => {
+    const base = await fixture((_url, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ status })) })
+    const vault = await createVault({ backend: 'memory', env: {} }); await vault.set('OPENROUTER_API_KEY', 'fixture-only')
+    const provider = createOpenRouterProvider({ vault, baseUrl: base, fetchPolicy: { allowHosts: [], allowPrivateHosts: true } })
+    expect(await provider.poll('vid', 't2v')).toMatchObject({ status: status === 'cancelled' ? 'cancelled' : 'failed' })
+  })
   it('fails a video download error without holding the body', async () => {
     const base = await fixture((url, res, origin) => {
       if (url === '/api/v1/videos/vid') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ status: 'completed', unsigned_urls: [`${origin}/content`] })); return }
