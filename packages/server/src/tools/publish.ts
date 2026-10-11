@@ -97,7 +97,7 @@ export const metricsIngest = defineTool({
   async handler(a, ctx) {
     try {
       let r: { ingested: number; skipped: number }
-      if (a.source === 'csv') { if (!a.csv_path) return toolError('csv_path required'); r = await ctx.metrics.ingestCsv(a.csv_path) }
+      if (a.source === 'csv') { if (!a.csv_path) return toolError('csv_path required'); r = await ctx.metrics.ingestCsv(a.csv_path, [process.cwd(), ctx.home]) }
       else if (a.source === 'manual') {
         r = ctx.metrics.ingestManual((a.observations ?? []).map(o => { const { publication_id, observed_at, window_hours, ...metrics } = o; return { publicationId: publication_id, ...(observed_at ? { observedAt: observed_at } : {}), ...(window_hours ? { windowHours: window_hours } : {}), metrics: Object.fromEntries(Object.entries(metrics).filter(([, v]) => v !== undefined)) as Partial<Record<MetricField, number>> } }))
       } else r = await ctx.metrics.ingestFromAdapter('postiz', a.publication_ids)

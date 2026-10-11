@@ -52,11 +52,12 @@ export async function createCreatorServer(opts: CreatorServerOptions): Promise<C
     const hidden = new Set(curation.hide ?? [])
     const supported = SUBSTRATE_TOOLS.filter(t => t.name !== transcribe.name || ctx.providers.forTask('stt').length > 0)
     const base = supported.filter(t => !hidden.has(t.name))
-    const composite = await loadCompositeTools(ctx, supported)
+    const composite = await loadCompositeTools(ctx, base)
     const all = [...base, ...(opts.brandTools ?? []), ...composite]
     const names: string[] = []
     for (const def of all) {
       const name = curation.alias?.[def.name] ?? def.name
+      if (names.includes(name)) throw new Error(`Duplicate Creator tool name: ${name}`)
       const defaults = curation.defaults?.[def.name]
       names.push(name)
       server.registerTool(name, { title: def.title, description: def.description, inputSchema: def.inputSchema, outputSchema: def.outputSchema, annotations: def.annotations }, async (args: Record<string, unknown>, mcp: ServerContext) => {

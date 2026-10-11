@@ -82,11 +82,13 @@ export class JobManager {
   private async ingestResult(job: JobRecord, pj: ProviderJob): Promise<JobRecord> {
     const result = pj.result as ProviderResult
     const rows: AssetRow[] = []
+    let text: string | undefined
     try {
       for (const out of result.outputs) {
-        if (out.kind === 'text') continue
-        const bytes = out.bytes ?? (out.url ? await this.download(out.url, job.provider) : null)
+        const bytes = out.kind === 'text' && typeof out.text === 'string' ? Buffer.from(out.text, 'utf8') : out.bytes ?? (out.url ? await this.download(out.url, job.provider) : null)
         if (!bytes) continue
+        if (bytes.byteLength > this.o.maxAssetBytes) throw new Error('provider output exceeds byte limit')
+        if (out.kind === 'text' && text === undefined) text = Buffer.from(bytes).toString('utf8')
         const prov = (job.request as { provenance?: SubmitInput['provenance'] }).provenance ?? {}
         const summary = job.request as Record<string, unknown>
         rows.push(await this.o.assets.ingest({
@@ -109,7 +111,6 @@ export class JobManager {
     } catch (err) {
       return this.o.ledger.updateJob(job.id, { status: 'failed', error: `result ingest failed: ${(err as Error).message}` })!
     }
-    const text = result.outputs.find(o => o.kind === 'text')?.text
     const first = rows[0]
     return this.o.ledger.updateJob(job.id, {
       status: 'completed', ...(first ? { resultSha256: first.sha256 } : {}), candidates: rows.map(r => ({ sha256: r.sha256 })),

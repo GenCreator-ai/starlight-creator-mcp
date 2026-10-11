@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { PACK_SCHEMA_VERSION } from '@starlight-intelligence/creator-packs-spec'
-import { CanonIndex, loadPacks } from './index.js'
+import { CanonIndex, chunkMarkdown, loadPacks } from './index.js'
 import { mergePacks, packManifestSchema } from '@starlight-intelligence/creator-packs-spec'
 import { createLogger, Redactor } from '../log.js'
 
@@ -18,6 +18,13 @@ async function fixture() {
 }
 afterEach(async () => { if (dir) await rm(dir, { recursive: true, force: true }) })
 describe('private pack free sections', () => {
+  it('retains all long canon section text across bounded chunks without splitting a surrogate pair', () => {
+    const body = 'x'.repeat(3999) + '\u{1f30d}' + ' useful tail '.repeat(800)
+    const chunks = chunkMarkdown(body, 'fixture', 'long.md', false)
+    expect(chunks.map(c => c.text).join('')).toBe(body.trim())
+    expect(chunks.every(c => c.text.length <= 4000)).toBe(true)
+    expect(chunks.some(c => c.text.includes('useful tail'))).toBe(true)
+  })
   it('retains declared empty and non-markdown files independently of search chunks', async () => {
     await fixture()
     await writeFile(path.join(dir, 'canon/empty.md'), ' \n ')

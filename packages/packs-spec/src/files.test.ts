@@ -22,6 +22,13 @@ async function fixture() {
 }
 afterEach(async () => { if (dir) await rm(dir, { recursive: true, force: true }) })
 describe('pack file boundaries', () => {
+  it('validates literal bracket and brace canon filenames rather than treating them as globs', async () => {
+    const { pack } = await fixture()
+    await writeFile(path.join(pack, 'pack.json'), JSON.stringify({ schemaVersion: PACK_SCHEMA_VERSION, id: 'fixture', name: 'Fixture', version: '1.0.0', license: { type: 'MIT' }, canon: { paths: ['missing[1].md', 'missing{1}.md'] } }))
+    expect((await validatePackDir(pack)).ok).toBe(false)
+    await writeFile(path.join(pack, 'missing[1].md'), 'fixture'); await writeFile(path.join(pack, 'missing{1}.md'), 'fixture')
+    expect((await validatePackDir(pack)).ok).toBe(true)
+  })
   it('binds nested init contents and additions to the pack digest', async () => {
     const { pack } = await fixture()
     await mkdir(path.join(pack, 'init/nested'), { recursive: true })

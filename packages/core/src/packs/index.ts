@@ -95,7 +95,12 @@ export function chunkMarkdown(text: string, packId: string, file: string, locked
   let n = 0
   const flush = () => {
     const body = buf.join('\n').trim()
-    if (body) chunks.push({ id: `${packId}:${file}#${n++}`, packId, file, heading, text: body.slice(0, 4000), locked })
+    for (let offset = 0; offset < body.length;) {
+      let end = Math.min(offset + 4000, body.length)
+      if (end < body.length && /[\uD800-\uDBFF]/.test(body[end - 1]!) && /[\uDC00-\uDFFF]/.test(body[end]!)) end--
+      chunks.push({ id: `${packId}:${file}#${n++}`, packId, file, heading, text: body.slice(offset, end), locked })
+      offset = end
+    }
     buf = []
   }
   for (const line of lines) {

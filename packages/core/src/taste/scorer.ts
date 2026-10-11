@@ -1,11 +1,10 @@
-import { readFile } from 'node:fs/promises'
 import type { MergedPack, Rubric } from '@starlight-intelligence/creator-packs-spec'
-import { sha256Hex } from '@starlight-intelligence/creator-packs-spec'
+import { PackPathError, readPackText, sha256Hex } from '@starlight-intelligence/creator-packs-spec'
 import { ulid } from '../ids.js'
 import type { Ledger } from '../ledger/interface.js'
 import type { Provider } from '../provider/interface.js'
 import type { Score, TextRequest } from '../types.js'
-import { assertRealInside, resolveInside } from '../fs/sandbox.js'
+import { SandboxError } from '../fs/sandbox.js'
 
 export interface JudgeTarget { kind: 'image' | 'text'; bytes?: Uint8Array; mime?: string; text?: string; sha256?: string }
 
@@ -23,7 +22,11 @@ export class TasteScorer {
   }
 
   async buildPrompt(rubric: RubricRecord): Promise<string> {
-    const persona = rubric.promptFile ? await readFile(await assertRealInside(rubric.dir, resolveInside(rubric.dir, rubric.promptFile)), 'utf8') : 'You are an exacting reviewer.'
+    let persona = 'You are an exacting reviewer.'
+    if (rubric.promptFile) {
+      try { persona = await readPackText(rubric.dir, rubric.promptFile) }
+      catch (error) { if (error instanceof PackPathError) throw new SandboxError(error.message); throw error }
+    }
     const dims = rubric.dimensions.map(d => `- ${d.id} (weight ${d.weight}${d.invert ? ', higher = worse' : ''})${d.guidance ? `: ${d.guidance}` : ''}`).join('\n')
     const autoFail = rubric.autoFail.length ? `\nAuto-fail conditions (set auto_failed to the matching strings when present): ${rubric.autoFail.join('; ')}` : ''
     return `${persona.trim()}\n\nScore each dimension 0-100:\n${dims}${autoFail}\n\nRespond with JSON only: {"dims":{"<id>":number},"strengths":[string],"weaknesses":[string],"auto_failed":[string]}`

@@ -26,6 +26,52 @@ afterEach(async () => {
   home = undefined!
 })
 describe('owned Creator context lifecycle', () => {
+  it('denies linked and oversized local asset imports through HTTP tools', async () => {
+    const ctx = await context(), outside = path.join(home, 'outside')
+    await mkdir(ctx.assets.local.root, { recursive: true })
+    await mkdir(outside); await writeFile(path.join(outside, 'private.txt'), 'private fixture')
+    await symlink(outside, path.join(ctx.assets.local.root, 'linked'), process.platform === 'win32' ? 'junction' : 'dir')
+    await writeFile(path.join(ctx.assets.local.root, 'large.txt'), 'oversized fixture')
+    ctx.config.policy.maxAssetBytes = 4
+    const running = await serveCreatorHttp({ ...options, context: ctx }, { port: 0 }); servers.push(running.server)
+    for (const import_path of ['linked/private.txt', 'large.txt']) {
+      const response = await fetch(running.url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'creator_asset_sync', arguments: { import_path } } }) })
+      const body = await response.text(), dataLine = body.split('\n').find(line => line.startsWith('data:'))
+      expect(JSON.parse(dataLine ? dataLine.slice(5) : body).result.isError).toBe(true)
+    }
+    expect(ctx.ledger.listAssets({ limit: 10 }).assets).toEqual([])
+  })
+  it('applies pack file containment and byte caps to creator_pack_info templates', async () => {
+    const ctx = await context(), pack = path.join(home, 'pack'), outside = path.join(home, 'outside')
+    await mkdir(pack); await mkdir(outside); await writeFile(path.join(outside, 'private.txt'), 'private fixture')
+    await symlink(outside, path.join(pack, 'linked'), process.platform === 'win32' ? 'junction' : 'dir')
+    await writeFile(path.join(pack, 'large.md'), Buffer.alloc(8 * 1024 * 1024 + 1))
+    ctx.merged.templates.set('linked', { packId: 'fixture', dir: pack, path: 'linked/private.txt', kind: 'text', tags: [] })
+    ctx.merged.templates.set('large', { packId: 'fixture', dir: pack, path: 'large.md', kind: 'text', tags: [] })
+    const running = await serveCreatorHttp({ ...options, context: ctx }, { port: 0 }); servers.push(running.server)
+    for (const template of ['linked', 'large']) {
+      const response = await fetch(running.url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'creator_pack_info', arguments: { section: 'templates', template } } }) })
+      const body = await response.text(), dataLine = body.split('\n').find(line => line.startsWith('data:'))
+      expect(JSON.parse(dataLine ? dataLine.slice(5) : body).result.isError).toBe(true)
+      expect(body).not.toContain('private fixture')
+    }
+  })
+  it('returns an injected STT transcript and persists its actual text asset', async () => {
+    const ctx = await context()
+    ctx.providers.register({ id: 'fixture-stt', allowHosts: [], capabilities: () => ['stt'], isConfigured: async () => true,
+      listModels: async () => [{ id: 'fixture-stt/transcript', provider: 'fixture-stt', modelId: 'transcript', name: 'Fixture transcript', tasks: ['stt'] }],
+      submit: async () => ({ providerJobId: 'fixture-stt-job', status: 'completed', result: { outputs: [{ kind: 'text', text: 'Fixture transcript', mime: 'text/plain' }] } }),
+      poll: async () => { throw new Error('completed fixture must not poll') } })
+    const audio = await ctx.assets.ingest({ bytes: Buffer.from('audio fixture'), mime: 'audio/wav', provenance: { task: 'import' } })
+    const running = await serveCreatorHttp({ ...options, context: ctx }, { port: 0 }); servers.push(running.server)
+    const response = await fetch(running.url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'creator_transcribe', arguments: { source_asset: audio.sha256, model: 'fixture-stt/transcript' } } }) })
+    const body = await response.text(), dataLine = body.split('\n').find(line => line.startsWith('data:'))
+    const result = JSON.parse(dataLine ? dataLine.slice(5) : body).result
+    expect(result.isError).not.toBe(true)
+    expect(result.structuredContent.transcript).toBe('Fixture transcript')
+    expect(result.structuredContent.asset?.kind).toBe('text')
+    expect(Buffer.from((await ctx.assets.bytes(result.structuredContent.asset.sha256))!.bytes).toString()).toBe('Fixture transcript')
+  })
   it('reads declared empty and non-markdown canon through HTTP resources', async () => {
     const ctx = await context(), pack = path.join(home, 'pack')
     await mkdir(path.join(pack, 'canon'), { recursive: true })

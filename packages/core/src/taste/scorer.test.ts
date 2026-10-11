@@ -18,6 +18,11 @@ async function fixture() {
   return { home, dir, rubric, scorer }
 }
 describe('rubric prompt containment', () => {
+  it('rejects oversized rubric prompts before a judge call', async () => {
+    const { dir, rubric, scorer } = await fixture()
+    await writeFile(path.join(dir, 'large.md'), Buffer.alloc(8 * 1024 * 1024 + 1))
+    await expect(scorer.buildPrompt({ ...rubric, promptFile: 'large.md' })).rejects.toThrow('8 MiB')
+  })
   it('denies traversal and absolute paths even on direct scorer calls', async () => {
     const { home, rubric, scorer } = await fixture()
     for (const promptFile of ['../outside.md', path.join(home, 'outside.md'), 'C:\\outside.md', '\\\\server\\share']) {

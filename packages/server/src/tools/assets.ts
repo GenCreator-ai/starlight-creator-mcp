@@ -1,6 +1,5 @@
-import { readFile, stat } from 'node:fs/promises'
 import * as z from 'zod/v4'
-import { discardBody, guardedFetch, readBodyLimited, resolveInside, sniffMime, type AssetFilter, type Task } from '@starlight-intelligence/creator-core'
+import { discardBody, guardedFetch, readBodyLimited, readSandboxFile, sniffMime, type AssetFilter, type Task } from '@starlight-intelligence/creator-core'
 import { embedAsset, scoreOutOf, summarizeAsset, textLine } from '../content.js'
 import { errorResult, toolError } from '../errors.js'
 import { assetRef, assetSummary, scoreOut, task } from '../schemas.js'
@@ -93,10 +92,7 @@ export const assetSync = defineTool({
       }
       if (a.import_path) {
         const roots = [ctx.assets.local.root, process.cwd(), ctx.home]
-        let full: string | null = null
-        for (const root of roots) { try { full = resolveInside(root, a.import_path); await stat(full); break } catch { full = null } }
-        if (!full) return toolError(`import_path must be a relative path inside the assets dir, the project dir or ~/.creator-mcp`, 'copy the file there first, or pass import_url')
-        const bytes = new Uint8Array(await readFile(full))
+        const bytes = await readSandboxFile(roots, a.import_path, ctx.config.policy.maxAssetBytes)
         const row = await ctx.assets.ingest({ bytes, mime: a.mime ?? sniffMime(bytes), provenance: { task: 'import', origin: { kind: 'imported_file', ref: a.import_path }, pack: { ids: ctx.merged.packs.map(p => p.id), digest: ctx.merged.digest } } })
         const out = { asset: summarizeAsset(ctx, row) }
         return { content: [textLine(out)], structuredContent: out }

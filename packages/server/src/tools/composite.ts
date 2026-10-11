@@ -15,6 +15,7 @@ export async function loadCompositeTools(ctx: CreatorContext, base: AnyToolDef[]
   const byName = new Map(base.map(t => [t.name, t]))
   for (const ref of ctx.merged.tools) {
     const def = compositeToolSchema.parse(JSON.parse(await readPackText(ref.dir, ref.path))) as CompositeTool
+    for (const step of def.steps) if (step.kind === 'call' && !byName.has(step.tool)) throw new Error(`composite ${def.name} references unavailable built-in tool ${step.tool}`)
     const inputSchema = fromJsonSchemaToZod(def.input)
     out.push({
       name: def.name, title: def.name.replace(/_/g, ' '), description: `${def.description} (pack ${ref.packId})`,
@@ -42,6 +43,7 @@ export async function loadCompositeTools(ctx: CreatorContext, base: AnyToolDef[]
             const parsed = target.inputSchema.safeParse(callArgs)
             if (!parsed.success) return toolError(`composite step ${step.tool} has invalid args: ${parsed.error.issues.map(i => i.message).join('; ')}`)
             const res = await target.handler(parsed.data, context, mcp)
+            if ('isError' in res && res.isError) return res
             const structured = 'structuredContent' in res ? res.structuredContent : undefined
             if (structured && typeof structured === 'object') for (const [k, v] of Object.entries(structured)) vars[`${step.tool}.${k}`] = v
             steps.push({ kind: 'call', ref: step.tool, output: structured ?? null })

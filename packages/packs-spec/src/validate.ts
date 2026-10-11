@@ -6,7 +6,7 @@ import { compilePackPattern } from './pattern.js'
 export interface PackIssue { level: 'error' | 'warning'; path: string; message: string }
 export interface PackValidation { ok: boolean; manifest?: PackManifest; issues: PackIssue[] }
 
-const GLOB_CHARS = /[*?[\]{}]/
+const GLOB_CHARS = /[*?]/
 
 export async function readPackManifest(dir: string): Promise<unknown> {
   const raw = await readPackText(dir, 'pack.json')
