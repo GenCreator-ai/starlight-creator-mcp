@@ -14,8 +14,9 @@ This branch starts at accepted main ffdbdc68d95ef318c69c729347f0ad7a94917545
 and preserves readiness commits f2c05c7 and 860f4c0 with author provenance. These
 include the ElevenLabs provider, S3/R2 connector, bundled starter pack and package
 licenses. The primary Claude checkout and its uncommitted scoped manifest remain
-untouched. No root AGENTS.override.md, AGENTS.md or CLAUDE.md exists in this repo;
-README and SECURITY were read explicitly with the shared founder/workspace policies.
+untouched. The original checkout had no root agent guide; README and SECURITY
+were read explicitly with the shared founder/workspace policies. The release
+repair now includes a repository-specific AGENTS.md describing these contracts.
 
 The repaired bundle is scoped creator-mcp@0.1.1 because its published 0.1.0 version
 cannot be replaced. Internal candidates remain 0.1.0. CLI discovery and server.json
