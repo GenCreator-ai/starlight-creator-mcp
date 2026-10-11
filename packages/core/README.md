@@ -10,4 +10,10 @@ Part of the [Starlight creator substrate](https://github.com/frankxai/starlight-
 
 Provider output hosts require an explicit provider or operator allowlist entry. Output URLs do not expand that list. If result retrieval or storage fails, the durable ledger keeps the original provider job ID. Correct the configuration, reopen the context, then call `context.jobs.retryIngest(jobId)` to poll that job and ingest its output again without submitting another generation. Normal `refresh` leaves terminal failures unchanged. Recovery depends on the provider still retaining the output; polling may have provider-specific charges.
 
+An inline provider may not retain an output for later retrieval. An empty recovery result leaves the job failed, with its reported cost intact, rather than claiming completion.
+
+Asset queries use deterministic timestamp/hash cursors, literal Unicode case-insensitive search and pack membership from both current `pack.ids` and legacy `pack.id` provenance. Pages accept 1–1,000 items; SQLite applies filtering and pagination before decoding selected rows. Metric queries return at most 10,000 observations and reject larger matching sets; narrow the publication or time window rather than accepting partial analytics.
+
+The JSONL fallback replays UTF-8 in chunks, caps journals at 64 MiB and individual records at 1 MiB, and rejects invalid JSON/operations. Appends exceeding a budget or failing on disk leave the in-memory state unchanged. Preserve an oversized or damaged journal for repair or a data-preserving SQLite migration. Merely changing backend does not import it. These bounds are not a cross-process transaction, filesystem sandbox or fsync durability guarantee. Historical rate-hit retention and a supported JSONL migration/compaction workflow remain open.
+
 MIT.

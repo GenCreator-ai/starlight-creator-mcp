@@ -92,8 +92,8 @@ export class JobManager {
     }
     if (pj.status === 'failed' || pj.status === 'cancelled') return this.o.ledger.updateJob(jobId, { status: pj.status, error: pj.error ?? `provider reported ${pj.status}` })
     if (pj.status === 'completed') {
-      if (pj.result) return this.ingestResult(job, pj)
-      return this.o.ledger.updateJob(jobId, { error: 'result ingest failed: provider returned no result' })
+      if (pj.result?.outputs.length) return this.ingestResult(job, pj)
+      return this.o.ledger.updateJob(jobId, { error: 'result ingest failed: provider returned no recoverable output' })
     }
     return this.o.ledger.updateJob(jobId, { status: pj.status, error: undefined })
   }

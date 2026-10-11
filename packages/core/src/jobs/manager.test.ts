@@ -153,4 +153,14 @@ describe('provider output egress and durable retrieval', () => {
       expect(f.submit).toHaveBeenCalledTimes(1)
     } finally { f.ledger.close() }
   })
+  it('does not report successful recovery when an inline provider has no retained output', async () => {
+    const f = await outputFixture()
+    try {
+      await f.manager.refresh(f.job.id)
+      f.poll.mockResolvedValueOnce({ providerJobId: 'durable-provider-job', status: 'completed', result: { outputs: [] } })
+      expect(await f.manager.retryIngest(f.job.id)).toMatchObject({ status: 'failed', costUsd: 0.5, error: 'result ingest failed: provider returned no recoverable output' })
+      expect(f.ledger.listAssets({}).assets).toHaveLength(0)
+      expect(f.submit).toHaveBeenCalledTimes(1)
+    } finally { f.ledger.close() }
+  })
 })
