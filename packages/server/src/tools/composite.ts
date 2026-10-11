@@ -1,5 +1,4 @@
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
+import { readPackText } from '@starlight-intelligence/creator-packs-spec'
 import * as z from 'zod/v4'
 import { compositeToolSchema, fromJsonSchemaToZod, type CompositeTool } from '../json-schema.js'
 import type { CreatorContext } from '@starlight-intelligence/creator-core'
@@ -15,7 +14,7 @@ export async function loadCompositeTools(ctx: CreatorContext, base: AnyToolDef[]
   const out: AnyToolDef[] = []
   const byName = new Map(base.map(t => [t.name, t]))
   for (const ref of ctx.merged.tools) {
-    const def = compositeToolSchema.parse(JSON.parse(await readFile(path.join(ref.dir, ref.path), 'utf8'))) as CompositeTool
+    const def = compositeToolSchema.parse(JSON.parse(await readPackText(ref.dir, ref.path))) as CompositeTool
     const inputSchema = fromJsonSchemaToZod(def.input)
     out.push({
       name: def.name, title: def.name.replace(/_/g, ' '), description: `${def.description} (pack ${ref.packId})`,
@@ -29,12 +28,12 @@ export async function loadCompositeTools(ctx: CreatorContext, base: AnyToolDef[]
           if (step.kind === 'template') {
             const t = context.merged.templates.get(step.template)
             if (!t) return toolError(`template ${step.template} not found in loaded packs`)
-            const text = fill(await readFile(path.join(t.dir, t.path), 'utf8'), vars)
+            const text = fill(await readPackText(t.dir, t.path), vars)
             vars.template = text; texts.push(text); steps.push({ kind: 'template', ref: step.template, output: text })
           } else if (step.kind === 'prompt') {
             const p = context.merged.prompts.get(step.prompt)
             if (!p) return toolError(`prompt ${step.prompt} not found in loaded packs`)
-            const text = fill(stripFrontmatter(await readFile(path.join(p.dir, p.path), 'utf8')), vars)
+            const text = fill(stripFrontmatter(await readPackText(p.dir, p.path)), vars)
             vars.prompt = text; texts.push(text); steps.push({ kind: 'prompt', ref: step.prompt, output: text })
           } else {
             const target = byName.get(step.tool)

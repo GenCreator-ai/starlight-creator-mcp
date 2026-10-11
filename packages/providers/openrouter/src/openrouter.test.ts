@@ -41,6 +41,33 @@ describe('OpenRouter releases unread error bodies', () => {
     expect(provider.capabilities()).not.toContain('stt')
   })
 
+  it('rejects a returned cross-origin video URL even when its host is allowlisted', async () => {
+    let requests = 0
+    const external = createServer((req, res) => { requests++; req.resume(); res.end('video') })
+    await new Promise<void>(resolve => external.listen(0, '127.0.0.1', resolve))
+    try {
+      const media = `http://127.0.0.1:${(external.address() as { port: number }).port}/content`
+      const base = await fixture((_url, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ status: 'completed', unsigned_urls: [media] })) })
+      const vault = await createVault({ backend: 'memory', env: {} })
+      await vault.set('OPENROUTER_API_KEY', 'fixture-only')
+      const provider = createOpenRouterProvider({ vault, baseUrl: base, fetchPolicy: { allowHosts: ['127.0.0.1'], allowPrivateHosts: true } })
+      await expect(provider.poll('vid', 't2v')).rejects.toThrow(/origin/)
+      expect(requests).toBe(0)
+    } finally { external.closeAllConnections(); await new Promise<void>(resolve => external.close(() => resolve())) }
+  })
+  it('preserves authorization on same-origin video content', async () => {
+    let authorized = false
+    const base = await fixture((url, res, origin) => {
+      res.setHeader('content-type', url === '/content' ? 'video/mp4' : 'application/json')
+      if (url === '/content') { authorized = true; res.end('video'); return }
+      res.end(JSON.stringify({ status: 'completed', unsigned_urls: [`${origin}/content`] }))
+    })
+    server!.on('request', (req) => { if (req.url === '/content') expect(req.headers.authorization).toBe('Bearer fixture-only') })
+    const vault = await createVault({ backend: 'memory', env: {} })
+    await vault.set('OPENROUTER_API_KEY', 'fixture-only')
+    expect((await createOpenRouterProvider({ vault, baseUrl: base, fetchPolicy: { allowHosts: [], allowPrivateHosts: true } }).poll('vid', 't2v')).result?.outputs).toHaveLength(1)
+    expect(authorized).toBe(true)
+  })
   it('fails a video download error without holding the body', async () => {
     const base = await fixture((url, res, origin) => {
       if (url === '/api/v1/videos/vid') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ status: 'completed', unsigned_urls: [`${origin}/content`] })); return }

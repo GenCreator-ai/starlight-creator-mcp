@@ -1,5 +1,4 @@
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
+import { readPackText } from '@starlight-intelligence/creator-packs-spec'
 import * as z from 'zod/v4'
 import type { McpServer } from '@modelcontextprotocol/server'
 import type { CreatorContext } from '@starlight-intelligence/creator-core'
@@ -31,7 +30,7 @@ export function parsePromptFile(text: string): { meta: PromptFrontmatter; body: 
 export async function registerPrompts(server: McpServer, ctx: CreatorContext): Promise<number> {
   let n = 0
   for (const [id, p] of ctx.merged.prompts) {
-    const { meta, body } = parsePromptFile(await readFile(path.join(p.dir, p.path), 'utf8'))
+    const { meta, body } = parsePromptFile(await readPackText(p.dir, p.path))
     const shape: Record<string, z.ZodType> = {}
     for (const a of meta.arguments ?? []) { let t: z.ZodType = z.string(); if (a.description) t = t.describe(a.description); shape[a.name] = a.required ? t : t.optional() }
     server.registerPrompt(meta.name ?? id, { title: meta.name ?? id, description: meta.description ?? p.description ?? `Prompt ${id} from pack ${p.packId}`, argsSchema: shape }, (args: Record<string, unknown>) => {

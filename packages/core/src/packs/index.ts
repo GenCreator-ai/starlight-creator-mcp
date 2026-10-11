@@ -1,6 +1,5 @@
-import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { loadPack, mergePacks, resolveCanonFiles, type LoadedPack, type MergedPack } from '@starlight-intelligence/creator-packs-spec'
+import { readPackText, loadPack, mergePacks, resolveCanonFiles, type LoadedPack, type MergedPack } from '@starlight-intelligence/creator-packs-spec'
 import type { Logger } from '../log.js'
 
 export interface CanonChunk { id: string; packId: string; file: string; heading: string; text: string; locked: boolean }
@@ -46,8 +45,8 @@ export class CanonIndex {
     for (const entry of merged.canonPaths) {
       for (const file of await resolveCanonFiles(entry.dir, [entry.pattern])) {
         if (!/\.(md|markdown|txt)$/i.test(file)) continue
-        const text = await readFile(file, 'utf8')
         const rel = path.relative(entry.dir, file).split(path.sep).join('/')
+        const text = await readPackText(entry.dir, rel)
         chunks.push(...chunkMarkdown(text, entry.packId, rel, lockedFiles.has(path.resolve(file))))
       }
     }

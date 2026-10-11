@@ -1,5 +1,4 @@
-import { readFile, stat } from 'node:fs/promises'
-import path from 'node:path'
+import { checkedPackPath, readPackText } from './files.js'
 import * as z from 'zod/v4'
 import { compositeToolSchema, packManifestSchema, type PackManifest } from './schema.js'
 import { compilePackPattern } from './pattern.js'
@@ -9,12 +8,8 @@ export interface PackValidation { ok: boolean; manifest?: PackManifest; issues: 
 
 const GLOB_CHARS = /[*?[\]{}]/
 
-async function exists(p: string): Promise<boolean> {
-  try { await stat(p); return true } catch { return false }
-}
-
 export async function readPackManifest(dir: string): Promise<unknown> {
-  const raw = await readFile(path.join(dir, 'pack.json'), 'utf8')
+  const raw = await readPackText(dir, 'pack.json')
   return JSON.parse(raw)
 }
 
@@ -43,17 +38,19 @@ export async function validatePackDir(dir: string): Promise<PackValidation> {
   if (m.init) refs.push(['init.dir', m.init.dir])
   for (const [label, rel] of refs) {
     if (!rel) continue
-    if (!(await exists(path.join(dir, rel)))) issues.push({ level: 'error', path: label, message: `referenced file missing: ${rel}` })
+    try { await checkedPackPath(dir, rel, label === 'init.dir' ? 'directory' : 'file') }
+    catch (err) { issues.push({ level: 'error', path: label, message: `referenced file missing or unsafe: ${rel}: ${(err as Error).message}` }) }
   }
   for (const [i, p] of m.canon.paths.entries()) {
+    try { (await import('./load.js')).compilePackGlob(p) }
+    catch (err) { issues.push({ level: 'error', path: `canon.paths.${i}`, message: (err as Error).message }); continue }
     if (GLOB_CHARS.test(p)) continue
-    if (!(await exists(path.join(dir, p)))) issues.push({ level: 'error', path: `canon.paths.${i}`, message: `canon path missing: ${p}` })
+    try { await checkedPackPath(dir, p) }
+    catch (err) { issues.push({ level: 'error', path: `canon.paths.${i}`, message: `canon path missing or unsafe: ${p}: ${(err as Error).message}` }) }
   }
   for (const [i, toolPath] of m.tools.entries()) {
-    const full = path.join(dir, toolPath)
-    if (!(await exists(full))) continue
     try {
-      compositeToolSchema.parse(JSON.parse(await readFile(full, 'utf8')))
+      compositeToolSchema.parse(JSON.parse(await readPackText(dir, toolPath)))
     } catch (err) {
       const message = err instanceof z.ZodError ? err.issues.map(x => x.message).join('; ') : (err as Error).message
       issues.push({ level: 'error', path: `tools.${i}`, message: `invalid composite tool: ${message}` })

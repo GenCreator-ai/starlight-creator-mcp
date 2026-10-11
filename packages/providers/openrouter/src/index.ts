@@ -77,6 +77,8 @@ export function createOpenRouterProvider(opts: OpenRouterProviderOptions): Provi
       if (data.status === 'failed') return { providerJobId, status: 'failed', error: typeof data.error === 'string' ? data.error : data.error?.message ?? 'video generation failed' }
       if (data.status !== 'completed') return { providerJobId, status: data.status === 'pending' ? 'queued' : 'running' }
       const urls = data.unsigned_urls?.length ? data.unsigned_urls : [`${base}/api/v1/videos/${encodeURIComponent(providerJobId)}/content`]
+      // OpenRouter content endpoints are authenticated; never send this key to a returned external origin.
+      for (const url of urls) if (new URL(url).origin !== new URL(base).origin) throw new ProviderError('openrouter video content origin differs from API origin', 'openrouter')
       const auth = await headers()
       const outputs = []
       for (const url of urls) {

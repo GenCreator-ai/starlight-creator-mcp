@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process'
-import { lstat, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import {
   CreatorContext, SECRET_NAMES, assertRealInside, creatorHome, createVault, loadConfig, saveConfig, resolveInside, sqliteAvailable, type Provider, type Vault,
 } from '@starlight-intelligence/creator-core'
-import { validatePackDir } from '@starlight-intelligence/creator-packs-spec'
+import { readPackText, validatePackDir } from '@starlight-intelligence/creator-packs-spec'
 import { createCreatorServer, defaultProviders, defaultStorageConnectors, packsFromEnv, serveCreatorHttp, STARTER_PACK, type AnyToolDef, type ToolCuration } from '@starlight-intelligence/creator-server'
 
 export interface CliBrand {
@@ -68,7 +68,8 @@ export async function runCli(b: CliBrand, argv = process.argv.slice(2)): Promise
     }
     case 'setup': return setup(b, rest)
     case 'doctor': return doctor(b, serverOpts)
-    case 'init': return init(b, rest)
+    case 'init':
+      try { return await init(b, rest) } catch (err) { process.stderr.write(`refusing to initialise: ${(err as Error).message}\n`); return 1 }
     case 'approve': return approve(b, serverOpts, rest)
     case 'packs': {
       for (const dir of packs) { const v = await validatePackDir(dir); process.stdout.write(`${v.ok ? 'OK  ' : 'FAIL'} ${v.manifest?.id ?? '?'}@${v.manifest?.version ?? '?'}  ${dir}\n`); for (const i of v.issues) process.stdout.write(`      ${i.level}: ${i.path}: ${i.message}\n`) }
@@ -177,33 +178,38 @@ async function init(b: CliBrand, args: string[]): Promise<number> {
       }
     } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err }
   }
-  await mkdir(target, { recursive: true })
-  let n = 0
-  const walk = async (rel: string) => {
+  // Preflight the complete tree before copying: links and special files are not templates.
+  if (!(await lstat(templates)).isDirectory() || (await lstat(templates)).isSymbolicLink()) throw new Error('template root must be a real directory')
+  const files: string[] = [], directories: string[] = []
+  const collect = async (rel: string) => {
     for (const e of await readdir(path.join(templates, rel), { withFileTypes: true })) {
       const r = path.join(rel, e.name)
-      if (e.isDirectory()) { await mkdir(resolveInside(target, r), { recursive: true }); await walk(r); continue }
-      const out = resolveInside(target, r)
-      try { await stat(out); process.stdout.write(`  skip ${r} (exists)\n`); continue } catch { /* new */ }
-      let body = (await readFile(path.join(templates, r), 'utf8')).replace(/\{\{\s*projectName\s*\}\}/g, name).replace(/\{\{\s*brand\s*\}\}/g, b.brand)
-      if (r === '.mcp.json') {
-        const settings = JSON.parse(body) as { mcpServers?: Record<string, unknown> }
-        if (settings.mcpServers?.creator) settings.mcpServers.creator = {
-          ...clientLaunch(b),
-          env: { CREATOR_MCP_HOME: resolveInside(target, '.creator-mcp') },
-        }
-        body = JSON.stringify(settings, null, 2) + '\n'
-      }
-      await mkdir(path.dirname(out), { recursive: true })
-      try { await writeFile(out, body, { flag: 'wx' }) }
-      catch (err) { if ((err as NodeJS.ErrnoException).code === 'EEXIST') continue; throw err }
-      n++
+      if (e.isSymbolicLink() || (!e.isDirectory() && !e.isFile())) throw new Error('template input must not contain links or special files')
+      await assertRealInside(target, resolveInside(target, r))
+      if (e.isDirectory()) { directories.push(r); await collect(r) } else files.push(r)
     }
   }
-  await walk('')
-  await mkdir(workspaceAssets, { recursive: true })
-  await assertRealInside(target, workspaceAssets)
-  await mkdir(workspaceHome, { recursive: true, mode: 0o700 })
+  await collect('')
+  await mkdir(target, { recursive: true })
+  for (const rel of directories) await mkdir(await assertRealInside(target, resolveInside(target, rel)), { recursive: true })
+  let n = 0
+  for (const r of files) {
+    const out = await assertRealInside(target, resolveInside(target, r))
+    try { await lstat(out); process.stdout.write(`  skip ${r} (exists)\n`); continue }
+    catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err }
+    let body = (await readPackText(templates, r)).replace(/\{\{\s*projectName\s*\}\}/g, name).replace(/\{\{\s*brand\s*\}\}/g, b.brand)
+    if (r === '.mcp.json') {
+      const settings = JSON.parse(body) as { mcpServers?: Record<string, unknown> }
+      if (settings.mcpServers?.creator) settings.mcpServers.creator = { ...clientLaunch(b), env: { CREATOR_MCP_HOME: resolveInside(target, '.creator-mcp') } }
+      body = JSON.stringify(settings, null, 2) + '\n'
+    }
+    await mkdir(await assertRealInside(target, path.dirname(out)), { recursive: true })
+    try { await writeFile(await assertRealInside(target, out), body, { flag: 'wx' }) }
+    catch (err) { if ((err as NodeJS.ErrnoException).code === 'EEXIST') continue; throw err }
+    n++
+  }
+  await mkdir(await assertRealInside(target, workspaceAssets), { recursive: true })
+  await mkdir(await assertRealInside(target, workspaceHome), { recursive: true, mode: 0o700 })
   const workspaceConfig = await assertRealInside(target, resolveInside(target, '.creator-mcp/config.json'))
   try { await writeFile(workspaceConfig, JSON.stringify({ storage: { assetsDir: workspaceAssets } }, null, 2) + '\n', { flag: 'wx', mode: 0o600 }) }
   catch (err) { if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err }

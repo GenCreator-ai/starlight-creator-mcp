@@ -17,4 +17,22 @@ Patterns allow at most 512 characters and input at most 65,536 characters.
 Directory validation and runtime matching reject other regular-expression syntax.
 Existing packs using arbitrary regexes must migrate to this grammar.
 
+Canon globs use `compilePackGlob`, a bounded matcher with literals, `?`, `*`,
+and `**` as a whole directory segment. Patterns are capped at 512 characters
+and relative paths at 4096. This replaces the pre-release `globToRegExp` API;
+call the returned matcher rather than `.test()` on a generated regex.
+
+Pack file APIs (`checkedPackPath`, `readPackFile`, `readPackText`) check portable
+relative paths and real containment at the point of access, require regular files,
+and cap each read at 8 MiB. Outward links, Windows roots and alternate streams are
+rejected. Protect pack directories from concurrent untrusted mutation; these
+checks are not an OS sandbox.
+
+Unknown-entity detection uses the loaded entity-index type labels, with a simple
+English singular form for `s` / `ies` plurals. It only checks a type label followed
+by a capitalized one-word name, using the combined known names and aliases.
+It does not inject a brand vocabulary or classify arbitrary proper nouns.
+Multiword entity names and irregular plurals need explicit aliases/type labels
+and are outside this detector's current scope.
+
 MIT.

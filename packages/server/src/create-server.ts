@@ -37,31 +37,46 @@ export interface CreatorServer { server: McpServer; ctx: CreatorContext; toolNam
 
 export async function createCreatorServer(opts: CreatorServerOptions): Promise<CreatorServer> {
   const ctx = opts.context ?? (await CreatorContext.create({ packs: opts.packs, providers: opts.providers, storageConnectors: opts.storageConnectors ?? defaultStorageConnectors, ...(opts.packsByBenefit ? { packsByBenefit: opts.packsByBenefit } : {}), ...(opts.dev !== undefined ? { dev: opts.dev } : {}) }))
-  const server = new McpServer({ name: opts.name, version: opts.version }, { instructions: opts.instructions ?? defaultInstructions(ctx) })
-  const curation = opts.tools ?? {}
-  const hidden = new Set(curation.hide ?? [])
-  const supported = SUBSTRATE_TOOLS.filter(t => t.name !== transcribe.name || ctx.providers.forTask('stt').length > 0)
-  const base = supported.filter(t => !hidden.has(t.name))
-  const composite = await loadCompositeTools(ctx, supported)
-  const all = [...base, ...(opts.brandTools ?? []), ...composite]
-  const names: string[] = []
-  for (const def of all) {
-    const name = curation.alias?.[def.name] ?? def.name
-    const defaults = curation.defaults?.[def.name]
-    names.push(name)
-    server.registerTool(name, { title: def.title, description: def.description, inputSchema: def.inputSchema, outputSchema: def.outputSchema, annotations: def.annotations }, async (args: Record<string, unknown>, mcp: ServerContext) => {
-      try {
-        const merged = defaults ? { ...defaults, ...args } : args
-        const parsed = def.inputSchema.parse(merged)
-        return await def.handler(parsed, ctx, mcp)
-      } catch (err) {
-        return errorResult(err)
-      }
-    })
+  let contextClose: Promise<void> | undefined
+  const closeContext = () => opts.context ? Promise.resolve() : (contextClose ??= ctx.close())
+  let server: McpServer | undefined
+  try {
+    server = new McpServer({ name: opts.name, version: opts.version }, { instructions: opts.instructions ?? defaultInstructions(ctx) })
+    // Modern serving closes the low-level Server, while legacy serving closes McpServer.
+    // Wire both paths; a borrowed context stays under its caller's ownership.
+    server.server.onclose = () => { void closeContext().catch(err => ctx.log.error('context cleanup failed', { error: (err as Error).message })) }
+    const protocolClose = server.close.bind(server)
+    let closing: Promise<void> | undefined
+    server.close = () => closing ??= Promise.resolve().then(async () => { try { await protocolClose() } finally { await closeContext() } })
+    const curation = opts.tools ?? {}
+    const hidden = new Set(curation.hide ?? [])
+    const supported = SUBSTRATE_TOOLS.filter(t => t.name !== transcribe.name || ctx.providers.forTask('stt').length > 0)
+    const base = supported.filter(t => !hidden.has(t.name))
+    const composite = await loadCompositeTools(ctx, supported)
+    const all = [...base, ...(opts.brandTools ?? []), ...composite]
+    const names: string[] = []
+    for (const def of all) {
+      const name = curation.alias?.[def.name] ?? def.name
+      const defaults = curation.defaults?.[def.name]
+      names.push(name)
+      server.registerTool(name, { title: def.title, description: def.description, inputSchema: def.inputSchema, outputSchema: def.outputSchema, annotations: def.annotations }, async (args: Record<string, unknown>, mcp: ServerContext) => {
+        try {
+          const merged = defaults ? { ...defaults, ...args } : args
+          const parsed = def.inputSchema.parse(merged)
+          return await def.handler(parsed, ctx, mcp)
+        } catch (err) {
+          return errorResult(err)
+        }
+      })
+    }
+    registerResources(server, ctx)
+    await registerPrompts(server, ctx)
+    return { server, ctx, toolNames: names }
+  } catch (err) {
+    try { if (server) await server.close(); else await closeContext() }
+    catch (cleanup) { throw new AggregateError([err, cleanup], 'Creator server registration and cleanup failed') }
+    throw err
   }
-  registerResources(server, ctx)
-  await registerPrompts(server, ctx)
-  return { server, ctx, toolNames: names }
 }
 
 function defaultInstructions(ctx: CreatorContext): string {

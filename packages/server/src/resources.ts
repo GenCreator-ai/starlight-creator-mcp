@@ -1,7 +1,6 @@
-import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server'
-import { resolveCanonFiles } from '@starlight-intelligence/creator-packs-spec'
+import { readPackText, resolveCanonFiles } from '@starlight-intelligence/creator-packs-spec'
 import type { CreatorContext } from '@starlight-intelligence/creator-core'
 
 export function registerResources(server: McpServer, ctx: CreatorContext): void {
@@ -37,8 +36,8 @@ export function registerResources(server: McpServer, ctx: CreatorContext): void 
     const pack = m.packs.find(p => p.id === packId)
     if (!pack) throw new Error(`pack ${packId} not loaded`)
     const rel = String(vars.file)
-    if (rel.split('/').includes('..')) throw new Error('invalid path')
-    const text = await readFile(path.join(pack.dir, rel), 'utf8')
+    if (!ctx.packs.canon.files().some(f => f.packId === packId && f.file === rel) && !m.locked.some(f => f.packId === packId && f.path === rel)) throw new Error('canon file not declared by this pack')
+    const text = await readPackText(pack.dir, rel)
     return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text }] }
   })
 
@@ -47,16 +46,16 @@ export function registerResources(server: McpServer, ctx: CreatorContext): void 
   }), { title: 'Pack template' }, async (uri, vars) => {
     const t = m.templates.get(String(vars.templateId))
     if (!t || t.packId !== String(vars.packId)) throw new Error(`template ${String(vars.templateId)} not found`)
-    return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text: await readFile(path.join(t.dir, t.path), 'utf8') }] }
+    return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text: await readPackText(t.dir, t.path) }] }
   })
 
   server.registerResource('pack-rubric', new ResourceTemplate('pack://{packId}/rubrics/{rubricId}', {
     list: async () => ({ resources: [...m.rubrics.values()].map(r => ({ uri: `pack://${r.packId}/rubrics/${r.id}`, name: r.id, mimeType: 'application/json' })) }),
   }), { title: 'Pack rubric' }, async (uri, vars) => {
     const r = m.rubrics.get(String(vars.rubricId))
-    if (!r) throw new Error(`rubric ${String(vars.rubricId)} not found`)
+    if (!r || r.packId !== String(vars.packId)) throw new Error(`rubric ${String(vars.rubricId)} not found`)
     const { dir, ...rest } = r
-    const prompt = r.promptFile ? await readFile(path.join(dir, r.promptFile), 'utf8') : null
+    const prompt = r.promptFile ? await readPackText(dir, r.promptFile) : null
     return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify({ ...rest, prompt }, null, 2) }] }
   })
 

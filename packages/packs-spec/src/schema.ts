@@ -1,4 +1,5 @@
 import * as z from 'zod/v4'
+import { resolvePackPath } from './files.js'
 
 export const PACK_SCHEMA_VERSION = 'creator-pack-manifest.v1'
 
@@ -9,7 +10,7 @@ export const qualitySchema = z.enum(['high', 'draft'])
 export type Quality = z.infer<typeof qualitySchema>
 
 const idSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'lowercase kebab-case id')
-const relPath = z.string().min(1).refine(p => !p.startsWith('/') && !/^[a-zA-Z]:/.test(p) && !p.split(/[\/]/).includes('..'), 'relative path inside the pack')
+const relPath = z.string().min(1).refine(p => { try { resolvePackPath('.', p); return true } catch { return false } }, 'relative path inside the pack')
 
 export const licenseSchema = z.object({
   type: z.string().min(1),
