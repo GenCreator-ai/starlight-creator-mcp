@@ -95,11 +95,12 @@ export const transcribe = defineTool({
 export const jobStatus = defineTool({
   name: 'creator_job_status',
   title: 'Job status',
-  description: 'Poll a generation job. Optionally wait up to wait_ms for it to finish. When completed, returns the asset summary and an inline image preview.',
-  inputSchema: z.object({ job_id: z.string(), wait_ms: waitMs.default(0) }),
+  description: 'Poll a generation job. Optionally wait up to wait_ms for it to finish. After correcting a result-ingest failure, retry_ingest retrieves the same provider job again without submitting a new generation. When completed, returns the asset summary and an inline image preview.',
+  inputSchema: z.object({ job_id: z.string(), wait_ms: waitMs.default(0), retry_ingest: z.boolean().default(false) }),
   outputSchema: jobOut,
-  annotations: READ_ONLY_NET,
+  annotations: { ...READ_ONLY_NET, readOnlyHint: false },
   async handler(a, ctx) {
+    if (a.retry_ingest) await ctx.jobs.retryIngest(a.job_id)
     const job = a.wait_ms > 0 ? await ctx.jobs.waitFor(a.job_id, a.wait_ms) : await ctx.jobs.refresh(a.job_id)
     if (!job) return toolError(`job ${a.job_id} not found`)
     const result = jobOutOf(ctx, job)

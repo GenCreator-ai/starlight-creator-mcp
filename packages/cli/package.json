@@ -14,7 +14,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "repository": {
     "type": "git",
@@ -34,9 +35,12 @@
     "@starlight-intelligence/creator-core": "workspace:*",
     "@starlight-intelligence/creator-server": "workspace:*",
     "@starlight-intelligence/creator-packs-spec": "workspace:*",
-    "@modelcontextprotocol/server": "2.0.0"
+    "@modelcontextprotocol/server": "2.3.1"
   },
   "bin": {
     "creator-mcp": "./dist/main.js"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

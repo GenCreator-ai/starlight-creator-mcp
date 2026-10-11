@@ -1,19 +1,15 @@
-import { readFile, stat } from 'node:fs/promises'
-import path from 'node:path'
+import { checkedPackPath, readPackText } from './files.js'
 import * as z from 'zod/v4'
 import { compositeToolSchema, packManifestSchema, type PackManifest } from './schema.js'
+import { compilePackPattern } from './pattern.js'
 
 export interface PackIssue { level: 'error' | 'warning'; path: string; message: string }
 export interface PackValidation { ok: boolean; manifest?: PackManifest; issues: PackIssue[] }
 
-const GLOB_CHARS = /[*?[\]{}]/
-
-async function exists(p: string): Promise<boolean> {
-  try { await stat(p); return true } catch { return false }
-}
+const GLOB_CHARS = /[*?]/
 
 export async function readPackManifest(dir: string): Promise<unknown> {
-  const raw = await readFile(path.join(dir, 'pack.json'), 'utf8')
+  const raw = await readPackText(dir, 'pack.json')
   return JSON.parse(raw)
 }
 
@@ -42,17 +38,19 @@ export async function validatePackDir(dir: string): Promise<PackValidation> {
   if (m.init) refs.push(['init.dir', m.init.dir])
   for (const [label, rel] of refs) {
     if (!rel) continue
-    if (!(await exists(path.join(dir, rel)))) issues.push({ level: 'error', path: label, message: `referenced file missing: ${rel}` })
+    try { await checkedPackPath(dir, rel, label === 'init.dir' ? 'directory' : 'file') }
+    catch (err) { issues.push({ level: 'error', path: label, message: `referenced file missing or unsafe: ${rel}: ${(err as Error).message}` }) }
   }
   for (const [i, p] of m.canon.paths.entries()) {
+    try { (await import('./load.js')).compilePackGlob(p) }
+    catch (err) { issues.push({ level: 'error', path: `canon.paths.${i}`, message: (err as Error).message }); continue }
     if (GLOB_CHARS.test(p)) continue
-    if (!(await exists(path.join(dir, p)))) issues.push({ level: 'error', path: `canon.paths.${i}`, message: `canon path missing: ${p}` })
+    try { await checkedPackPath(dir, p) }
+    catch (err) { issues.push({ level: 'error', path: `canon.paths.${i}`, message: `canon path missing or unsafe: ${p}: ${(err as Error).message}` }) }
   }
   for (const [i, toolPath] of m.tools.entries()) {
-    const full = path.join(dir, toolPath)
-    if (!(await exists(full))) continue
     try {
-      compositeToolSchema.parse(JSON.parse(await readFile(full, 'utf8')))
+      compositeToolSchema.parse(JSON.parse(await readPackText(dir, toolPath)))
     } catch (err) {
       const message = err instanceof z.ZodError ? err.issues.map(x => x.message).join('; ') : (err as Error).message
       issues.push({ level: 'error', path: `tools.${i}`, message: `invalid composite tool: ${message}` })
@@ -62,11 +60,11 @@ export async function validatePackDir(dir: string): Promise<PackValidation> {
   for (const r of m.rubrics) if (r.default) defaultsByKind.set(r.kind, (defaultsByKind.get(r.kind) ?? 0) + 1)
   for (const [kind, n] of defaultsByKind) if (n > 1) issues.push({ level: 'error', path: 'rubrics', message: `${n} default rubrics for kind ${kind}; at most one allowed` })
   for (const intent of m.registry.intents) {
-    try { new RegExp(intent.pattern, 'i') } catch { issues.push({ level: 'error', path: `registry.intents.${intent.id}`, message: 'pattern is not a valid regular expression' }) }
+    try { compilePackPattern(intent.pattern) } catch (error) { issues.push({ level: 'error', path: `registry.intents.${intent.id}`, message: (error as Error).message }) }
     if (!(intent.preferenceKey in m.registry.preferences)) issues.push({ level: 'warning', path: `registry.intents.${intent.id}`, message: `preferenceKey ${intent.preferenceKey} has no preference list in this pack (may come from another pack)` })
   }
   for (const fp of m.canon.forbiddenPatterns) {
-    try { new RegExp(fp.pattern, 'i') } catch { issues.push({ level: 'error', path: 'canon.forbiddenPatterns', message: `invalid pattern: ${fp.pattern}` }) }
+    try { compilePackPattern(fp.pattern) } catch (error) { issues.push({ level: 'error', path: 'canon.forbiddenPatterns', message: (error as Error).message }) }
   }
   if (m.publishing.requireRubric && !m.rubrics.some(r => r.id === m.publishing.requireRubric)) issues.push({ level: 'warning', path: 'publishing.requireRubric', message: `rubric ${m.publishing.requireRubric} not defined in this pack` })
   if (!m.publicSafe && !m.entitlement) issues.push({ level: 'warning', path: 'entitlement', message: 'pack is not publicSafe but declares no entitlement; it will only load with CREATOR_DEV=1' })

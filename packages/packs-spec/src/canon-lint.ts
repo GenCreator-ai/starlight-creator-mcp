@@ -1,6 +1,6 @@
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
+import { readPackText } from './files.js'
 import type { MergedPack } from './merge.js'
+import { compilePackPattern, PackPatternBudget } from './pattern.js'
 
 export interface CanonFinding { packId: string; pattern: string; message: string; excerpt: string; index: number }
 export interface CanonLintResult { ok: boolean; findings: CanonFinding[]; unknownEntities: string[] }
@@ -11,7 +11,7 @@ export async function loadEntities(merged: MergedPack): Promise<EntityIndex> {
   const byType: EntityIndex['byType'] = {}
   const names = new Set<string>()
   for (const e of merged.entities) {
-    const raw = JSON.parse(await readFile(path.join(e.dir, e.path), 'utf8')) as Record<string, Array<{ name: string; aliases?: string[] }>>
+    const raw = JSON.parse(await readPackText(e.dir, e.path)) as Record<string, Array<{ name: string; aliases?: string[] }>>
     for (const [type, list] of Object.entries(raw)) {
       byType[type] ??= []
       for (const item of list) {
@@ -27,17 +27,38 @@ export async function loadEntities(merged: MergedPack): Promise<EntityIndex> {
 
 export function lintText(text: string, merged: MergedPack, entities?: EntityIndex): CanonLintResult {
   const findings: CanonFinding[] = []
+  const budget = new PackPatternBudget()
   for (const fp of merged.forbiddenPatterns) {
-    const re = new RegExp(fp.pattern, 'gi')
-    for (const match of text.matchAll(re)) {
-      const start = Math.max(0, (match.index ?? 0) - 40)
-      findings.push({ packId: fp.packId, pattern: fp.pattern, message: fp.message, excerpt: text.slice(start, (match.index ?? 0) + match[0].length + 40).replace(/\s+/g, ' '), index: match.index ?? 0 })
+    for (const match of compilePackPattern(fp.pattern)(text, budget)) {
+      const start = Math.max(0, match.index - 40)
+      findings.push({ packId: fp.packId, pattern: fp.pattern, message: fp.message, excerpt: text.slice(start, match.index + match.text.length + 40).replace(/\s+/g, ' '), index: match.index })
     }
   }
   const unknownEntities: string[] = []
   if (entities && entities.names.size) {
     const candidates = new Set<string>()
-    for (const m of text.matchAll(/\b(?:Guardian|Godbeast|House|Realm|Gate)\s+([A-Z][\w'-]+)/g)) candidates.add(m[1]!)
+    // Entity type labels are data from this pack, never executable regex or global brand vocabulary.
+    const labels = new Set<string>()
+    for (const type of Object.keys(entities.byType)) {
+      const label = type.replace(/[_-]/g, ' ').toLowerCase()
+      labels.add(label)
+      if (label.endsWith('ies')) labels.add(label.slice(0, -3) + 'y')
+      else if (label.endsWith('s') && !label.endsWith('ss')) labels.add(label.slice(0, -1))
+    }
+    const words = [...text.matchAll(/[A-Za-z][\w'-]*/g)]
+    for (let i = 1; i < words.length; i++) {
+      const name = words[i]![0]
+      if (!/^[A-Z]/.test(name)) continue
+      // Adjacent type + capitalized one-word names may have a comma/colon separator.
+      for (const label of labels) {
+        const count = label.split(' ').length
+        if (i < count) continue
+        const previous = words.slice(i - count, i)
+        const start = previous[0]!.index!, end = words[i]!.index!
+        const prefix = text.slice(start, end).trim().replace(/[,:]$/, '').trim().toLowerCase().replace(/\s+/g, ' ')
+        if (prefix === label) candidates.add(name)
+      }
+    }
     for (const c of candidates) if (!entities.names.has(c.toLowerCase())) unknownEntities.push(c)
   }
   return { ok: findings.length === 0 && unknownEntities.length === 0, findings, unknownEntities }

@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { sha256Hex } from '@starlight-intelligence/creator-packs-spec'
-import { guardedFetch, type FetchPolicy } from '../net/fetch-guard.js'
+import { discardBody, guardedFetch, type FetchPolicy } from '../net/fetch-guard.js'
 import type { ManifestSigner } from '../publish/signer.js'
 
 export const POLAR_HOST = 'api.polar.sh'
@@ -59,7 +59,7 @@ export class PolarLicense {
 
   async activate(key: string, organizationId: string, label = `${os.hostname()}-${os.platform()}`): Promise<{ activationId: string } | null> {
     const res = await guardedFetch(`${this.base}/v1/customer-portal/license-keys/activate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, organization_id: organizationId, label }), policy: this.policy })
-    if (!res.ok) return null
+    if (!res.ok) { await discardBody(res); return null }
     const data = (await res.json()) as { id?: string }
     return data.id ? { activationId: data.id } : null
   }
@@ -84,10 +84,14 @@ export class PolarLicense {
         body: JSON.stringify({ key: input.key, organization_id: organizationId, ...(cached?.activationId ? { activation_id: cached.activationId } : {}) }), policy: this.policy,
       })
       if (res.status === 404 || res.status === 403 || res.status === 401) {
+        await discardBody(res)
         await this.writeCache({ fingerprint, organizationId, status: 'revoked', validatedAt: now.toISOString(), packs: [] })
         return { valid: false, source: 'online', status: 'revoked', packs: [], reason: `Polar rejected the key (${res.status})` }
       }
-      if (!res.ok) throw new Error(`Polar returned ${res.status}`)
+      if (!res.ok) {
+        await discardBody(res)
+        throw new Error(`Polar returned ${res.status}`)
+      }
       const data = (await res.json()) as { status?: string; expires_at?: string | null; benefit_id?: string; activation?: { id?: string } | null }
       const status = (data.status ?? 'revoked') as LicenseStatus['status']
       const packs = data.benefit_id ? (input.packsByBenefit[data.benefit_id] ?? []) : []

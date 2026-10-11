@@ -60,6 +60,14 @@ describe('best-of loop', () => {
 })
 
 describe('router', () => {
+  it('uses the normal route after 256 impossible intents on a maximum-size prompt', () => {
+    const m = merged({ intents: Array.from({ length: 256 }, (_, i) => ({ id: `rule-${i}`, task: 't2i', pattern: 'x', preferenceKey: 't2i:high' })) })
+    expect(routeModel(models, m.registry, { task: 't2i', quality: 'high', prompt: 'a'.repeat(65_536) }).model).toEqual(models[0])
+  })
+  it('fails rather than silently routing when near-matches exhaust the shared cap', () => {
+    const m = merged({ intents: Array.from({ length: 16 }, (_, i) => ({ id: `rule-${i}`, task: 't2i', pattern: 'aaaaab', preferenceKey: 't2i:high' })) })
+    expect(() => routeModel(models, m.registry, { task: 't2i', quality: 'high', prompt: 'a'.repeat(65_536) })).toThrow(/work budget/)
+  })
   it('uses pack preferences, intents and pins', () => {
     const m = merged({ preferences: { 't2i:high': ['nano-banana-pro', 'flux'], 't2i:draft': ['flux-schnell'], 't2i:text': ['gpt-image'] }, intents: [{ id: 'text', task: 't2i', pattern: '\\blogo\\b', preferenceKey: 't2i:text' }] })
     expect(routeModel(models, m.registry, { task: 't2i', quality: 'high' }).model.id).toBe('muapi/nano-banana-pro')
@@ -67,6 +75,10 @@ describe('router', () => {
     expect(routeModel(models, m.registry, { task: 't2i', quality: 'high', prompt: 'a logo for a bakery' }).model.id).toBe('openrouter/openai/gpt-image-1')
     const pinned = merged({ pins: { t2i: 'muapi/flux-schnell' } })
     expect(routeModel(models, pinned.registry, { task: 't2i', quality: 'high' }).reason).toContain('pin')
+  })
+  it('fails closed on a hostile pack intent without executing its regex', () => {
+    const m = merged({ intents: [{ id: 'hostile', task: 't2i', pattern: '(a+)+b', preferenceKey: 't2i:high' }] })
+    expect(() => routeModel(models, m.registry, { task: 't2i', quality: 'high', prompt: 'a'.repeat(1000) })).toThrow(/unsupported pack pattern/)
   })
   it('honours deny lists and rejects unknown explicit models', () => {
     const m = merged({ deny: ['muapi/nano-banana-pro'], preferences: { 't2i:high': ['nano-banana-pro'] } })

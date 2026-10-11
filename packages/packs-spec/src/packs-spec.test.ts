@@ -114,6 +114,24 @@ describe('canon lint', () => {
   })
 })
 
+describe('pack-driven entity vocabulary', () => {
+  it('recognizes comma and colon apposition after a type label without accepting unknown names', () => {
+    const merged = mergePacks([], '0.1.0')
+    const entities = { byType: { projects: [{ name: 'Atlas', aliases: [] }] }, names: new Set(['atlas']) }
+    expect(lintText('The project, Orion.', merged, entities).unknownEntities).toEqual(['Orion'])
+    expect(lintText('The project: Orion.', merged, entities).unknownEntities).toEqual(['Orion'])
+    expect(lintText('The project, Atlas.', merged, entities).ok).toBe(true)
+  })
+  const merged = mergePacks([], '0.1.0')
+  const entities = { byType: { projects: [{ name: 'Atlas', aliases: ['North'] }], regions: [{ name: 'West', aliases: [] }] }, names: new Set(['atlas', 'north', 'west']) }
+  it('finds unknown names using the loaded types, including singular labels', () => {
+    expect(lintText('Project Atlas, project North, Region South.', merged, entities).unknownEntities).toEqual(['South'])
+  })
+  it('does not inject another brand vocabulary into an unrelated pack', () => {
+    expect(lintText('Guardian Jane entered House Stone through Gate Nine.', merged, entities).ok).toBe(true)
+  })
+})
+
 describe('canonical hash', () => {
   it('is key-order independent', () => {
     expect(sha256CanonicalJson({ b: 1, a: [{ d: 2, c: 3 }] })).toBe(sha256CanonicalJson({ a: [{ c: 3, d: 2 }], b: 1 }))

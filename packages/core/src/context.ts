@@ -98,40 +98,47 @@ export class CreatorContext {
     const fetchPolicy: FetchPolicy = { allowHosts: [...config.policy.allowHosts, ...providers.allowedHosts()], allowPrivateHosts: config.policy.allowPrivateHosts, maxBytes: config.policy.maxAssetBytes }
     const home = creatorHome()
     const ledger = opts.ledger ?? openLedger({ home })
-    const local = new LocalStorage(assetsDir(config))
-    const connectors = new Map<string, StorageConnector>([['local', local]])
-    if (config.storage.rclone) connectors.set('rclone', new RcloneStorage(config.storage.rclone.remote, config.storage.rclone.prefix))
-    for (const c of await (opts.storageConnectors?.(vault, config) ?? Promise.resolve([]))) connectors.set(c.id, c)
-    const assets = new AssetStore({ ledger, local, connectors, substrateVersion: SUBSTRATE_VERSION })
-    const catalog = new ModelCatalog(providers, path.join(home, 'cache'), log.child('catalog'))
-    const jobs = new JobManager({ ledger, providers, assets, fetchPolicy, maxAssetBytes: config.policy.maxAssetBytes, log: log.child('jobs'), substrateVersion: SUBSTRATE_VERSION })
-    const judgeProvider = async () => {
-      const preferred = config.providers.judge
-      const order = preferred ? [preferred, ...providers.all().map(p => p.id)] : providers.all().map(p => p.id)
-      for (const id of order) {
-        if (!providers.has(id)) continue
-        const p = providers.get(id)
-        if (p.text && p.capabilities().includes('vision') && (await p.isConfigured())) return { provider: p }
+    try {
+      const local = new LocalStorage(assetsDir(config))
+      const connectors = new Map<string, StorageConnector>([['local', local]])
+      if (config.storage.rclone) connectors.set('rclone', new RcloneStorage(config.storage.rclone.remote, config.storage.rclone.prefix))
+      for (const c of await (opts.storageConnectors?.(vault, config) ?? Promise.resolve([]))) connectors.set(c.id, c)
+      const assets = new AssetStore({ ledger, local, connectors, substrateVersion: SUBSTRATE_VERSION })
+      const catalog = new ModelCatalog(providers, path.join(home, 'cache'), log.child('catalog'))
+      const jobs = new JobManager({ ledger, providers, assets, fetchPolicy, maxAssetBytes: config.policy.maxAssetBytes, log: log.child('jobs'), substrateVersion: SUBSTRATE_VERSION })
+      const judgeProvider = async () => {
+        const preferred = config.providers.judge
+        const order = preferred ? [preferred, ...providers.all().map(p => p.id)] : providers.all().map(p => p.id)
+        for (const id of order) {
+          if (!providers.has(id)) continue
+          const p = providers.get(id)
+          if (p.text && p.capabilities().includes('vision') && (await p.isConfigured())) return { provider: p }
+        }
+        return null
       }
-      return null
+      const scorer = new TasteScorer(ledger, judgeProvider)
+      const signer = new ManifestSigner(vault)
+      const publishAdapters = new Map<string, PublishAdapter>([['local', new LocalStagingAdapter(path.join(home, 'outbox'))]])
+      const postizKey = await vault.resolve(SECRET_NAMES.postiz)
+      if (config.postiz.apiUrl && postizKey) publishAdapters.set('postiz', new PostizAdapter({ apiUrl: config.postiz.apiUrl, apiKey: postizKey, fetchPolicy }))
+      const publish = new PublishService({ ledger, assets, signer, adapters: publishAdapters })
+      const metrics = new MetricsService(ledger, publishAdapters)
+      const license = new PolarLicense({ home, signer, fetchPolicy })
+      const packsByBenefit = opts.packsByBenefit ?? {}
+      const licenseKey = await vault.resolve(SECRET_NAMES.license)
+      let licensed = new Set<string>()
+      if (licenseKey) {
+        const status = await license.validate({ key: licenseKey, packsByBenefit }).catch(() => null)
+        if (status?.valid) licensed = new Set(status.packs)
+      }
+      const packs = await loadPacks(opts.packs, SUBSTRATE_VERSION, { log: log.child('packs'), licensedPackIds: licensed, dev: opts.dev ?? process.env.CREATOR_DEV === '1' })
+      return new CreatorContext(config, vault, log, providers, catalog, ledger, assets, connectors, jobs, scorer, signer, publishAdapters, publish, metrics, license, packs, fetchPolicy, packsByBenefit)
+    } catch (err) {
+      // A context was never returned, so the caller cannot release our resources.
+      // Injected ledgers remain the caller's responsibility on failed creation.
+      if (!opts.ledger) ledger.close()
+      throw err
     }
-    const scorer = new TasteScorer(ledger, judgeProvider)
-    const signer = new ManifestSigner(vault)
-    const publishAdapters = new Map<string, PublishAdapter>([['local', new LocalStagingAdapter(path.join(home, 'outbox'))]])
-    const postizKey = await vault.resolve(SECRET_NAMES.postiz)
-    if (config.postiz.apiUrl && postizKey) publishAdapters.set('postiz', new PostizAdapter({ apiUrl: config.postiz.apiUrl, apiKey: postizKey, fetchPolicy }))
-    const publish = new PublishService({ ledger, assets, signer, adapters: publishAdapters })
-    const metrics = new MetricsService(ledger, publishAdapters)
-    const license = new PolarLicense({ home, signer, fetchPolicy })
-    const packsByBenefit = opts.packsByBenefit ?? {}
-    const licenseKey = await vault.resolve(SECRET_NAMES.license)
-    let licensed = new Set<string>()
-    if (licenseKey) {
-      const status = await license.validate({ key: licenseKey, packsByBenefit }).catch(() => null)
-      if (status?.valid) licensed = new Set(status.packs)
-    }
-    const packs = await loadPacks(opts.packs, SUBSTRATE_VERSION, { log: log.child('packs'), licensedPackIds: licensed, dev: opts.dev ?? process.env.CREATOR_DEV === '1' })
-    return new CreatorContext(config, vault, log, providers, catalog, ledger, assets, connectors, jobs, scorer, signer, publishAdapters, publish, metrics, license, packs, fetchPolicy, packsByBenefit)
   }
 
   async route(task: Task, quality: Quality, prompt?: string, explicitModel?: string): Promise<RouteResult> {

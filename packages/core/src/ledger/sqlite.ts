@@ -6,6 +6,7 @@ import type { AssetFilter, AssetRow, Ledger, ManifestRow, MetricObservation, Pub
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS assets (sha256 TEXT PRIMARY KEY, kind TEXT, mime TEXT, task TEXT, model TEXT, provider TEXT, score REAL, created_at TEXT, pack_digest TEXT, json TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS assets_created ON assets(created_at);
+CREATE INDEX IF NOT EXISTS assets_page ON assets(created_at DESC, sha256);
 CREATE TABLE IF NOT EXISTS asset_locations (sha256 TEXT, connector TEXT, uri TEXT, synced_at TEXT, PRIMARY KEY (sha256, connector));
 CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, status TEXT, created_at TEXT, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scores (id TEXT PRIMARY KEY, sha256 TEXT, text_sha TEXT, rubric_id TEXT, created_at TEXT, json TEXT NOT NULL);
@@ -14,12 +15,15 @@ CREATE TABLE IF NOT EXISTS manifests (id TEXT PRIMARY KEY, payload_hash TEXT, st
 CREATE INDEX IF NOT EXISTS manifests_hash ON manifests(payload_hash);
 CREATE TABLE IF NOT EXISTS publications (id TEXT PRIMARY KEY, manifest_id TEXT, idempotency_key TEXT UNIQUE, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS metric_observations (id TEXT PRIMARY KEY, publication_id TEXT, observed_at TEXT, json TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS observations_publication ON metric_observations(publication_id, observed_at DESC);
 CREATE TABLE IF NOT EXISTS rate_limits (adapter TEXT, at TEXT);
 CREATE INDEX IF NOT EXISTS rate_limits_adapter ON rate_limits(adapter, at);
+CREATE INDEX IF NOT EXISTS rate_limits_time ON rate_limits(at);
 `
 
 interface SqliteDatabase {
   exec(sql: string): void
+  function(name: string, fn: (value: unknown) => string): void
   prepare(sql: string): { run(...args: unknown[]): unknown; get(...args: unknown[]): unknown; all(...args: unknown[]): unknown[] }
   close(): void
 }
@@ -33,13 +37,14 @@ function openDatabase(file: string): SqliteDatabase {
   return new mod.DatabaseSync(file)
 }
 
-function matchesAssetFilter(a: AssetRow, f: AssetFilter): boolean {
+export function matchesAssetFilter(a: AssetRow, f: AssetFilter): boolean {
   if (f.task && a.task !== f.task) return false
   if (f.model && a.model !== f.model) return false
   if (f.kind && a.kind !== f.kind) return false
   if (f.minScore !== undefined && (a.score ?? -1) < f.minScore) return false
   if (f.since && a.createdAt < f.since) return false
-  if (f.packId && !(String((a.provenance as { pack?: { id?: string } }).pack?.id ?? '') === f.packId)) return false
+  const pack = a.provenance.pack as { id?: string; ids?: string[] } | undefined
+  if (f.packId && pack?.id !== f.packId && !pack?.ids?.includes(f.packId)) return false
   if (f.query) {
     const q = f.query.toLowerCase()
     const hay = `${a.prompt ?? ''} ${a.model ?? ''} ${a.sha256}`.toLowerCase()
@@ -49,11 +54,24 @@ function matchesAssetFilter(a: AssetRow, f: AssetFilter): boolean {
 }
 
 export function paginate<T extends { createdAt: string } & Record<string, unknown>>(rows: T[], idKey: keyof T, limit: number, cursor?: string): { items: T[]; nextCursor?: string } {
-  const sorted = [...rows].sort((x, y) => (y.createdAt < x.createdAt ? -1 : y.createdAt > x.createdAt ? 1 : 0))
+  assetPageLimit(limit)
+  const sorted = [...rows].sort((x, y) => y.createdAt < x.createdAt ? -1 : y.createdAt > x.createdAt ? 1 : String(x[idKey]) < String(y[idKey]) ? -1 : String(x[idKey]) > String(y[idKey]) ? 1 : 0)
   const start = cursor ? sorted.findIndex(r => String(r[idKey]) === cursor) + 1 : 0
   const items = sorted.slice(start, start + limit)
   const last = items[items.length - 1]
   return start + limit < sorted.length && last ? { items, nextCursor: String(last[idKey]) } : { items }
+}
+
+export function assetPageLimit(limit: number): number {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new RangeError('asset page limit must be an integer from 1 to 1000')
+  return limit
+}
+
+export const MAX_OBSERVATIONS = 10000
+export function rateHitCutoff(): string { return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() }
+export function observationBudget<T>(rows: T[]): T[] {
+  if (rows.length > MAX_OBSERVATIONS) throw new RangeError('metric query exceeds 10000 observations; narrow the publication or time window')
+  return rows
 }
 
 export class SqliteLedger implements Ledger {
@@ -65,6 +83,8 @@ export class SqliteLedger implements Ledger {
     this.db = openDatabase(file)
     this.db.exec('PRAGMA journal_mode = WAL;')
     this.db.exec(SCHEMA_SQL)
+    // Preserve JavaScript Unicode case folding rather than SQLite's ASCII-only lower().
+    this.db.function('creator_lower', value => String(value ?? '').toLowerCase())
   }
 
   private rows<T>(sql: string, ...args: unknown[]): T[] {
@@ -90,9 +110,26 @@ export class SqliteLedger implements Ledger {
     return job?.resultSha256 ? this.getAsset(job.resultSha256) : null
   }
   listAssets(filter: AssetFilter): { assets: AssetRow[]; nextCursor?: string } {
-    const all = this.rows<AssetRow>('SELECT json FROM assets').filter(a => matchesAssetFilter(a, filter))
-    const { items, nextCursor } = paginate(all as Array<AssetRow & Record<string, unknown>>, 'sha256', filter.limit ?? 20, filter.cursor)
-    return nextCursor ? { assets: items, nextCursor } : { assets: items }
+    const limit = assetPageLimit(filter.limit ?? 20)
+    const where: string[] = [], args: unknown[] = []
+    for (const [value, column] of [[filter.task, 'task'], [filter.model, 'model'], [filter.kind, 'kind']] as const) {
+      if (value) { where.push(`${column} = ?`); args.push(value) }
+    }
+    if (filter.minScore !== undefined) { where.push('COALESCE(score, -1) >= ?'); args.push(filter.minScore) }
+    if (filter.since) { where.push('created_at >= ?'); args.push(filter.since) }
+    if (filter.packId) {
+      where.push("(json_extract(assets.json, '$.provenance.pack.id') = ? OR EXISTS (SELECT 1 FROM json_each(assets.json, '$.provenance.pack.ids') WHERE value = ?))")
+      args.push(filter.packId, filter.packId)
+    }
+    if (filter.query) { where.push("instr(creator_lower(COALESCE(json_extract(json, '$.prompt'), '') || ' ' || COALESCE(model, '') || ' ' || sha256), ?) > 0"); args.push(filter.query.toLowerCase()) }
+    const cursor = filter.cursor ? this.getAsset(filter.cursor) : null
+    if (cursor && matchesAssetFilter(cursor, filter)) {
+      where.push('(created_at < ? OR (created_at = ? AND sha256 > ?))')
+      args.push(cursor.createdAt, cursor.createdAt, cursor.sha256)
+    }
+    const rows = this.rows<AssetRow>(`SELECT json FROM assets ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC, sha256 ASC LIMIT ?`, ...args, limit + 1)
+    const assets = rows.slice(0, limit), last = assets[assets.length - 1]
+    return rows.length > limit && last ? { assets, nextCursor: last.sha256 } : { assets }
   }
   addLocation(sha256: string, connector: string, uri: string): void {
     this.db.prepare('INSERT OR REPLACE INTO asset_locations (sha256, connector, uri, synced_at) VALUES (?,?,?,?)').run(sha256, connector, uri, new Date().toISOString())
@@ -155,13 +192,24 @@ export class SqliteLedger implements Ledger {
     this.db.prepare('INSERT OR REPLACE INTO metric_observations (id, publication_id, observed_at, json) VALUES (?,?,?,?)').run(row.id, row.publicationId, row.observedAt, JSON.stringify(row))
   }
   observations(filter: { publicationId?: string; since?: string; until?: string }): MetricObservation[] {
-    return this.rows<MetricObservation>('SELECT json FROM metric_observations ORDER BY observed_at DESC').filter(o =>
-      (!filter.publicationId || o.publicationId === filter.publicationId) && (!filter.since || o.observedAt >= filter.since) && (!filter.until || o.observedAt <= filter.until))
+    const where: string[] = [], args: unknown[] = []
+    if (filter.publicationId) { where.push('publication_id = ?'); args.push(filter.publicationId) }
+    if (filter.since) { where.push('observed_at >= ?'); args.push(filter.since) }
+    if (filter.until) { where.push('observed_at <= ?'); args.push(filter.until) }
+    return observationBudget(this.rows<MetricObservation>(`SELECT json FROM metric_observations ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY observed_at DESC LIMIT ?`, ...args, MAX_OBSERVATIONS + 1))
   }
 
-  recordHit(adapter: string, at: string): void { this.db.prepare('INSERT INTO rate_limits (adapter, at) VALUES (?,?)').run(adapter, at) }
+  recordHit(adapter: string, at: string): void {
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.db.prepare('DELETE FROM rate_limits WHERE at < ?').run(rateHitCutoff())
+      this.db.prepare('INSERT INTO rate_limits (adapter, at) VALUES (?,?)').run(adapter, at)
+      this.db.exec('COMMIT')
+    } catch (error) { this.db.exec('ROLLBACK'); throw error }
+  }
   hitsSince(adapter: string, since: string): number {
-    const r = this.db.prepare('SELECT COUNT(*) AS n FROM rate_limits WHERE adapter = ? AND at >= ?').get(adapter, since) as { n: number }
+    const cutoff = rateHitCutoff()
+    const r = this.db.prepare('SELECT COUNT(*) AS n FROM rate_limits WHERE adapter = ? AND at >= ?').get(adapter, since > cutoff ? since : cutoff) as { n: number }
     return Number(r.n)
   }
 

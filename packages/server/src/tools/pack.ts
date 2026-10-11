@@ -1,5 +1,4 @@
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
+import { readPackText } from '@starlight-intelligence/creator-packs-spec'
 import * as z from 'zod/v4'
 import { SECRET_NAMES } from '@starlight-intelligence/creator-core'
 import { textLine } from '../content.js'
@@ -39,7 +38,7 @@ export const packInfo = defineTool({
         break
       case 'templates':
         result.templates = [...m.templates.entries()].map(([id, t]) => ({ id, pack: t.packId, kind: t.kind, tags: t.tags, ...(t.description ? { description: t.description } : {}) }))
-        if (a.template) { const t = m.templates.get(a.template); if (t) result.template_text = await readFile(path.join(t.dir, t.path), 'utf8') }
+        if (a.template) { const t = m.templates.get(a.template); if (t && (!a.pack || t.packId === a.pack)) result.template_text = await readPackText(t.dir, t.path) }
         break
       case 'styles':
         result.styles = [...m.styles.values()].map(s => ({ id: s.id, task: s.task, ...(s.label ? { label: s.label } : {}), ...(s.suffix ? { suffix: s.suffix } : {}), defaults: s.defaults }))

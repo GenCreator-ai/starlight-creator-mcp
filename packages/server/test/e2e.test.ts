@@ -1,10 +1,13 @@
-import { mkdtemp, readdir, readFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Client } from '@modelcontextprotocol/client'
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createServer } from 'node:http'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { CreatorContext, JsonlLedger, configSchema, createVault, type Provider } from '@starlight-intelligence/creator-core'
+import { createCreatorServer } from '../src/create-server.js'
 import { startMockProviders, type MockState } from './mock-providers.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -33,7 +36,8 @@ beforeAll(async () => {
     env: {
       ...process.env,
       CREATOR_MCP_HOME: home, CREATOR_PACKS: STARTER, CREATOR_ALLOW_PRIVATE_HOSTS: '1', CREATOR_VAULT_BACKEND: 'encrypted-file', CREATOR_LOG_LEVEL: 'warn',
-      MUAPI_BASE_URL: mock.url, OPENROUTER_BASE_URL: mock.url, MUAPI_KEY: 'test-muapi-key-000000', OPENROUTER_API_KEY: 'test-openrouter-key-000000',
+      MUAPI_BASE_URL: mock.url, OPENROUTER_BASE_URL: mock.url, ELEVENLABS_BASE_URL: mock.url,
+      MUAPI_KEY: 'test-muapi-key-000000', OPENROUTER_API_KEY: 'test-openrouter-key-000000', ELEVENLABS_API_KEY: 'test-eleven-key-000000',
     },
   })
   await client.connect(transport)
@@ -45,13 +49,35 @@ afterAll(async () => {
 })
 
 describe('creator-mcp over stdio', () => {
-  it('lists the 16 substrate tools with output schemas and annotations', async () => {
+  it('lists supported substrate tools with output schemas and annotations, without unavailable transcription', async () => {
     const { tools } = await client.listTools()
     const names = tools.map(t => t.name).sort()
-    expect(names).toEqual(['creator_asset_sync', 'creator_assets', 'creator_generate_audio', 'creator_generate_image', 'creator_generate_video', 'creator_job_status', 'creator_license_status', 'creator_metrics_ingest', 'creator_metrics_query', 'creator_models', 'creator_pack_info', 'creator_publication_approve', 'creator_publication_prepare', 'creator_publish', 'creator_score', 'creator_transcribe'])
+    expect(names).toEqual(['creator_asset_sync', 'creator_assets', 'creator_generate_audio', 'creator_generate_image', 'creator_generate_video', 'creator_job_status', 'creator_license_status', 'creator_metrics_ingest', 'creator_metrics_query', 'creator_models', 'creator_pack_info', 'creator_publication_approve', 'creator_publication_prepare', 'creator_publish', 'creator_score'])
     for (const t of tools) { expect(t.outputSchema, t.name).toBeDefined(); expect(t.annotations, t.name).toBeDefined() }
     expect(tools.find(t => t.name === 'creator_models')?.annotations?.readOnlyHint).toBe(true)
     expect(tools.find(t => t.name === 'creator_generate_image')?.annotations?.readOnlyHint).toBe(false)
+    expect(tools.find(t => t.name === 'creator_job_status')?.annotations?.readOnlyHint).toBe(false)
+  })
+
+  it('retains transcription for an injected provider that implements stt', async () => {
+    vi.stubEnv('CREATOR_MCP_HOME', home)
+    const ledger = new JsonlLedger(null)
+    const provider: Provider = {
+      id: 'fixture-stt', allowHosts: [], capabilities: () => ['stt'],
+      isConfigured: async () => true, listModels: async () => [],
+      submit: async () => { throw new Error('Fixture only checks discovery') },
+      poll: async () => { throw new Error('Fixture only checks discovery') },
+    }
+    let server: Awaited<ReturnType<typeof createCreatorServer>> | undefined
+    try {
+      const context = await CreatorContext.create({ config: configSchema.parse({}), vault: await createVault({ backend: 'memory' }), ledger,
+        packs: [], providers: () => [provider] })
+      server = await createCreatorServer({ name: 'fixture-stt', version: '0.0.0', packs: [], providers: () => [], context })
+      expect(server.toolNames).toContain('creator_transcribe')
+    } finally {
+      vi.unstubAllEnvs()
+      try { await server?.server.close() } finally { ledger.close() }
+    }
   })
 
   it('creator_models merges both providers and reports the pack default', async () => {
@@ -60,7 +86,7 @@ describe('creator-mcp over stdio', () => {
     expect(res.models.some(m => m.id === 'openrouter/openai/gpt-image-1')).toBe(true)
     expect(res.models.some(m => m.id.startsWith('muapi/'))).toBe(true)
     expect(res.default_for_task).toBe('muapi/nano-banana-pro')
-    expect(res.providers).toEqual([{ id: 'openrouter', configured: true }, { id: 'muapi', configured: true }, { id: 'google', configured: false }])
+    expect(res.providers).toEqual([{ id: 'openrouter', configured: true }, { id: 'muapi', configured: true }, { id: 'elevenlabs', configured: true }, { id: 'google', configured: false }])
   })
 
   it('routes a logo prompt to the typography preference and stores the asset with provenance', async () => {
@@ -95,6 +121,64 @@ describe('creator-mcp over stdio', () => {
     expect(done.status).toBe('completed')
     expect(done.asset?.kind).toBe('video')
     expect(done.cost_usd).toBe(0.5)
+  })
+
+  it('recovers a durable ingest failure through MCP without another provider submission', async () => {
+    const recoveryHome = await mkdtemp(path.join(os.tmpdir(), 'creator-mcp-recovery-'))
+    let downloads = 0
+    const origin = createServer((_req, res) => { downloads++; res.setHeader('Content-Type', 'video/mp4'); res.end('synthetic recovery video') })
+    await new Promise<void>(resolve => origin.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${(origin.address() as import('node:net').AddressInfo).port}/output.mp4`
+    const submit = vi.fn<Provider['submit']>(async () => ({ providerJobId: 'existing-provider-job', status: 'queued' }))
+    const poll = vi.fn<Provider['poll']>(async () => ({ providerJobId: 'existing-provider-job', status: 'completed', result: { outputs: [{ kind: 'video', mime: 'video/mp4', url }] }, costUsd: 0.5 }))
+    const provider: Provider = { id: 'fixture-recovery', allowHosts: [], capabilities: () => ['t2v'], isConfigured: async () => true, listModels: async () => [], submit, poll }
+    const file = path.join(recoveryHome, 'ledger.jsonl')
+    const session = async (allowPrivateHosts: boolean) => {
+      const context = await CreatorContext.create({ config: configSchema.parse({ storage: { assetsDir: path.join(recoveryHome, 'assets') }, policy: { allowHosts: ['127.0.0.1'], allowPrivateHosts } }),
+        vault: await createVault({ backend: 'memory' }), ledger: new JsonlLedger(file), packs: [], providers: () => [provider] })
+      const server = await createCreatorServer({ name: 'recovery-fixture', version: '0.0.0', packs: [], providers: () => [], context })
+      const client = new Client({ name: 'recovery-fixture', version: '0.0.0' })
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+      try {
+        await server.server.connect(serverTransport)
+        await client.connect(clientTransport)
+      } catch (error) {
+        await client.close(); await server.server.close(); await context.close()
+        throw error
+      }
+      return { context, client, close: async () => { try { await client.close(); await server.server.close() } finally { await context.close() } } }
+    }
+    let active: Awaited<ReturnType<typeof session>> | undefined
+    vi.stubEnv('CREATOR_MCP_HOME', recoveryHome)
+    try {
+      active = await session(false)
+      const job = await active.context.jobs.submit({ request: { task: 't2v', model: { id: 'fixture-recovery/video', provider: provider.id, modelId: 'video', name: 'Fixture', tasks: ['t2v'] }, params: {}, sources: [] }, provenance: {}, route: { model: 'fixture-recovery/video', provider: provider.id, reason: 'fixture' }, requestSummary: { prompt: 'synthetic recovery video' } })
+      const failed = structured<{ status: string; next_step?: string }>(await active.client.callTool({ name: 'creator_job_status', arguments: { job_id: job.id } }))
+      expect(failed.status).toBe('failed')
+      expect(failed.next_step).toContain('retry_ingest true')
+      expect(downloads).toBe(0)
+      await active.close(); active = undefined
+      // A loopback origin is enabled only for this test; production keeps private hosts denied.
+      active = await session(true)
+      expect(structured<{ status: string }>(await active.client.callTool({ name: 'creator_job_status', arguments: { job_id: job.id } })).status).toBe('failed')
+      expect(poll).toHaveBeenCalledTimes(1)
+      const done = structured<{ job_id: string; status: string; cost_usd?: number; error?: string; asset?: { sha256: string; local_path: string } }>(await active.client.callTool({ name: 'creator_job_status', arguments: { job_id: job.id, retry_ingest: true } }))
+      expect(done).toMatchObject({ job_id: job.id, status: 'completed', cost_usd: 0.5 })
+      expect(done.error).toBeUndefined()
+      expect(await readFile(done.asset!.local_path, 'utf8')).toBe('synthetic recovery video')
+      expect(active.context.ledger.getAsset(done.asset!.sha256)?.provenance).toMatchObject({ job_id: job.id, cost_usd: 0.5 })
+      expect(submit).toHaveBeenCalledTimes(1)
+      expect(poll.mock.calls).toEqual([['existing-provider-job', 't2v'], ['existing-provider-job', 't2v']])
+      expect(downloads).toBe(1)
+      await active.client.callTool({ name: 'creator_job_status', arguments: { job_id: job.id, retry_ingest: true } })
+      expect(poll).toHaveBeenCalledTimes(2)
+    } finally {
+      try { await active?.close() } finally {
+        vi.unstubAllEnvs()
+        await new Promise<void>(resolve => origin.close(() => resolve()))
+        await rm(recoveryHome, { recursive: true, force: true })
+      }
+    }
   })
 
   it('creator_score works on text with the default text rubric', async () => {
@@ -150,6 +234,26 @@ describe('creator-mcp over stdio', () => {
     expect(prep.warnings.some(w => w.includes('banned phrase "unlock"'))).toBe(true)
   })
 
+  it('generates speech, sound effects and music through the audio provider', async () => {
+    const tts = structured<{ status: string; asset?: { kind: string; mime: string } }>(await client.callTool({ name: 'creator_generate_audio', arguments: { kind: 'tts', text: 'The first gate opens at dawn.' } }))
+    expect(tts.status).toBe('completed')
+    expect(tts.asset?.kind).toBe('audio')
+    // no voice given, so the provider resolved one from the account
+    expect(mock.state.elevenCalls.at(-1)?.path).toBe('/v1/text-to-speech/voice_mock_1')
+
+    const sfx = structured<{ status: string; asset?: { kind: string } }>(await client.callTool({ name: 'creator_generate_audio', arguments: { kind: 'sfx', prompt: 'distant thunder over water', duration_s: 4 } }))
+    expect(sfx.status).toBe('completed')
+    expect(sfx.asset?.kind).toBe('audio')
+    expect((mock.state.elevenCalls.at(-1)?.body as { duration_seconds?: number }).duration_seconds).toBe(4)
+
+    const music = structured<{ status: string }>(await client.callTool({ name: 'creator_generate_audio', arguments: { kind: 'music', prompt: 'slow ambient strings', duration_s: 12 } }))
+    expect(music.status).toBe('completed')
+    expect(mock.state.elevenCalls.at(-1)?.path).toBe('/v1/music')
+    expect(mock.state.elevenCalls.at(-1)?.format).toBe('mp3_44100_128')
+    // seconds are converted to the API's milliseconds, clamped to its 3s-600s range
+    expect((mock.state.elevenCalls.at(-1)?.body as { music_length_ms?: number }).music_length_ms).toBe(12_000)
+  })
+
   it('license status is honest when no key is configured', async () => {
     const out = structured<{ valid: boolean; source: string }>(await client.callTool({ name: 'creator_license_status', arguments: {} }))
     expect(out.valid).toBe(false)
@@ -160,5 +264,24 @@ describe('creator-mcp over stdio', () => {
     const res = await client.callTool({ name: 'creator_asset_sync', arguments: { import_url: 'https://example.com/x.png' } })
     expect(res.isError).toBe(true)
     expect(String((res.content[0] as { text: string }).text)).toMatch(/allowlist/)
+  })
+
+  it('import_url failures release the unread error body and its connection', async () => {
+    const live = new Set<unknown>()
+    const origin = createServer((req, res) => {
+      live.add(req.socket)
+      req.socket.once('close', () => { live.delete(req.socket) })
+      res.writeHead(404, { 'content-type': 'text/plain' }); res.write('missing')
+    })
+    await new Promise<void>(resolve => origin.listen(0, '127.0.0.1', resolve))
+    try {
+      const res = await client.callTool({ name: 'creator_asset_sync', arguments: { import_url: `http://127.0.0.1:${(origin.address() as { port: number }).port}/x.png` } })
+      expect(res.isError).toBe(true)
+      expect(String((res.content[0] as { text: string }).text)).toContain('fetch returned 404')
+      await vi.waitFor(() => { expect(live.size).toBe(0) }, { timeout: 2000 })
+    } finally {
+      origin.closeAllConnections()
+      await new Promise<void>(resolve => origin.close(() => resolve()))
+    }
   })
 })

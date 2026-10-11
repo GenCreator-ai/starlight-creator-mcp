@@ -2,7 +2,8 @@ import type { AssetStore } from '../assets/store.js'
 import { ulid } from '../ids.js'
 import type { AssetRow, Ledger } from '../ledger/interface.js'
 import type { Logger } from '../log.js'
-import { guardedFetch, readBodyLimited, type FetchPolicy } from '../net/fetch-guard.js'
+import { discardBody, guardedFetch, readBodyLimited, type FetchPolicy } from '../net/fetch-guard.js'
+import { ProviderError } from '../provider/interface.js'
 import type { ProviderRegistry } from '../provider/registry.js'
 import type { GenerationRequest, JobRecord, ProviderJob, ProviderResult, Task } from '../types.js'
 
@@ -58,9 +59,10 @@ export class JobManager {
       pj = await provider.poll(job.providerJobId, job.task)
     } catch (err) {
       this.o.log.warn('poll failed', { job: jobId, error: (err as Error).message })
+      if (err instanceof ProviderError && !err.retryable) return this.o.ledger.updateJob(jobId, { status: 'failed', error: err.message })
       return job
     }
-    if (pj.status === 'failed') return this.o.ledger.updateJob(jobId, { status: 'failed', error: pj.error ?? 'provider reported failure' })
+    if (pj.status === 'failed' || pj.status === 'cancelled') return this.o.ledger.updateJob(jobId, { status: pj.status, error: pj.error ?? `provider reported ${pj.status}` })
     if (pj.status === 'completed' && pj.result) return this.ingestResult(job, pj)
     return this.o.ledger.updateJob(jobId, { status: 'running' })
   }
@@ -77,14 +79,37 @@ export class JobManager {
     return job
   }
 
+  /** Explicitly retrieve an existing provider job again; never submit generation. */
+  async retryIngest(jobId: string): Promise<JobRecord | null> {
+    const job = this.o.ledger.getJob(jobId)
+    if (!job || job.status !== 'failed' || !job.providerJobId || !job.error?.startsWith('result ingest failed:')) return job
+    const provider = this.o.providers.get(job.provider)
+    let pj: ProviderJob
+    try {
+      pj = await provider.poll(job.providerJobId, job.task)
+    } catch (err) {
+      return this.o.ledger.updateJob(jobId, { error: `result ingest failed: retrieval poll failed: ${(err as Error).message}` })
+    }
+    if (pj.status === 'failed' || pj.status === 'cancelled') return this.o.ledger.updateJob(jobId, { status: pj.status, error: pj.error ?? `provider reported ${pj.status}` })
+    if (pj.status === 'completed') {
+      if (pj.result?.outputs.length) return this.ingestResult(job, pj)
+      return this.o.ledger.updateJob(jobId, { error: 'result ingest failed: provider returned no recoverable output' })
+    }
+    return this.o.ledger.updateJob(jobId, { status: pj.status, error: undefined })
+  }
+
   private async ingestResult(job: JobRecord, pj: ProviderJob): Promise<JobRecord> {
     const result = pj.result as ProviderResult
     const rows: AssetRow[] = []
+    let text: string | undefined
     try {
+      if (!result.outputs.length) throw new Error('provider returned no recoverable output')
       for (const out of result.outputs) {
-        if (out.kind === 'text') continue
-        const bytes = out.bytes ?? (out.url ? await this.download(out.url, job.provider) : null)
-        if (!bytes) continue
+        const bytes = out.kind === 'text' && typeof out.text === 'string' ? Buffer.from(out.text, 'utf8') : out.bytes ?? (out.url ? await this.download(out.url, job.provider) : null)
+        if (!bytes) throw new Error('provider output has no bytes, text or URL')
+        if (!bytes.byteLength) throw new Error('provider returned empty output bytes')
+        if (bytes.byteLength > this.o.maxAssetBytes) throw new Error('provider output exceeds byte limit')
+        if (out.kind === 'text' && text === undefined) text = Buffer.from(bytes).toString('utf8')
         const prov = (job.request as { provenance?: SubmitInput['provenance'] }).provenance ?? {}
         const summary = job.request as Record<string, unknown>
         rows.push(await this.o.assets.ingest({
@@ -105,12 +130,11 @@ export class JobManager {
         }))
       }
     } catch (err) {
-      return this.o.ledger.updateJob(job.id, { status: 'failed', error: `result ingest failed: ${(err as Error).message}` })!
+      return this.o.ledger.updateJob(job.id, { status: 'failed', error: `result ingest failed: ${(err as Error).message}`, ...(pj.costUsd !== undefined ? { costUsd: pj.costUsd } : result.costUsd !== undefined ? { costUsd: result.costUsd } : {}) })!
     }
-    const text = result.outputs.find(o => o.kind === 'text')?.text
     const first = rows[0]
     return this.o.ledger.updateJob(job.id, {
-      status: 'completed', ...(first ? { resultSha256: first.sha256 } : {}), candidates: rows.map(r => ({ sha256: r.sha256 })),
+      status: 'completed', error: undefined, ...(first ? { resultSha256: first.sha256 } : {}), candidates: rows.map(r => ({ sha256: r.sha256 })),
       ...(pj.costUsd !== undefined ? { costUsd: pj.costUsd } : result.costUsd !== undefined ? { costUsd: result.costUsd } : {}), ...(text ? { request: { ...job.request, result_text: text } } : {}),
     })!
   }
@@ -118,9 +142,12 @@ export class JobManager {
   private async download(url: string, providerId: string): Promise<Uint8Array> {
     const provider = this.o.providers.get(providerId)
     const host = new URL(url).hostname
-    const policy: FetchPolicy = { ...this.o.fetchPolicy, allowHosts: [...this.o.fetchPolicy.allowHosts, ...provider.allowHosts, host], maxBytes: this.o.maxAssetBytes, timeoutMs: 120_000 }
+    const policy: FetchPolicy = { ...this.o.fetchPolicy, allowHosts: [...this.o.fetchPolicy.allowHosts, ...provider.allowHosts], maxBytes: this.o.maxAssetBytes, timeoutMs: 120_000 }
     const res = await guardedFetch(url, { policy })
-    if (!res.ok) throw new Error(`download ${host} returned ${res.status}`)
+    if (!res.ok) {
+      await discardBody(res)
+      throw new Error(`download ${host} returned ${res.status}`)
+    }
     return readBodyLimited(res, this.o.maxAssetBytes)
   }
 

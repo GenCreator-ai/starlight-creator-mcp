@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readSandboxFile } from '../fs/sandbox.js'
 import { ulid } from '../ids.js'
 import type { Ledger, MetricObservation } from '../ledger/interface.js'
 import type { PublishAdapter } from '../publish/adapter.js'
@@ -22,8 +22,8 @@ export class MetricsService {
     return { ingested, skipped }
   }
 
-  async ingestCsv(csvPath: string): Promise<{ ingested: number; skipped: number }> {
-    const text = await readFile(csvPath, 'utf8')
+  async ingestCsv(csvPath: string, roots: readonly string[] = [process.cwd()]): Promise<{ ingested: number; skipped: number }> {
+    const text = (await readSandboxFile(roots, csvPath, 8 * 1024 * 1024)).toString('utf8')
     const [headerLine, ...lines] = text.split(/\r?\n/).filter(l => l.trim())
     if (!headerLine) return { ingested: 0, skipped: 0 }
     const headers = headerLine.split(',').map(h => h.trim())
@@ -38,7 +38,7 @@ export class MetricsService {
       for (const f of METRIC_FIELDS) {
         const snake = f.replace(/[A-Z]/g, c => `_${c.toLowerCase()}`)
         const v = rec[f] ?? rec[snake]
-        if (v !== undefined && v !== '' && !Number.isNaN(Number(v))) metrics[f] = Number(v)
+        if (v !== undefined && v !== '' && Number.isFinite(Number(v))) metrics[f] = Number(v)
       }
       items.push({ publicationId, source: 'csv', ...(rec.observed_at ? { observedAt: rec.observed_at } : {}), metrics })
     }

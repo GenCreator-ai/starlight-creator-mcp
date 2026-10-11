@@ -13,10 +13,19 @@ export interface IngestInput {
   dimensions?: { width?: number; height?: number; durationS?: number }
 }
 
+class AssetDigestError extends Error {}
+
 export class AssetStore {
   constructor(private readonly o: AssetStoreOptions) {}
 
   get local(): LocalStorage { return this.o.local }
+
+  private verifiedBytes(sha256: string, bytes: Uint8Array, connector: string): Uint8Array {
+    // Copy before the check so a connector cannot mutate a shared buffer during caching.
+    const owned = Uint8Array.from(bytes)
+    if (sha256Hex(owned) !== sha256) throw new AssetDigestError(`asset digest mismatch from ${connector}`)
+    return owned
+  }
 
   async ingest(input: IngestInput): Promise<AssetRow> {
     const sha256 = sha256Hex(input.bytes)
@@ -44,13 +53,31 @@ export class AssetStore {
     if (!row) return null
     const ext = extForMime(row.mime)
     const local = await this.o.local.get(sha256, ext)
-    if (local) return { bytes: local, mime: row.mime }
+    let corruption: AssetDigestError | undefined
+    if (local) {
+      try { return { bytes: this.verifiedBytes(sha256, local, 'local'), mime: row.mime } }
+      catch (error) {
+        if (!(error instanceof AssetDigestError)) throw error
+        corruption = error
+      }
+    }
     for (const loc of this.o.ledger.locations(sha256)) {
       const c = this.o.connectors.get(loc.connector)
       if (!c || c.id === 'local') continue
       const b = await c.get(sha256, ext)
-      if (b) { await this.o.local.put(sha256, b, { mime: row.mime, ext }); return { bytes: b, mime: row.mime } }
+      if (b) {
+        let verified: Uint8Array
+        try { verified = this.verifiedBytes(sha256, b, c.id) }
+        catch (error) {
+          if (!(error instanceof AssetDigestError)) throw error
+          corruption ??= error
+          continue
+        }
+        await this.o.local.put(sha256, verified, { mime: row.mime, ext })
+        return { bytes: verified, mime: row.mime }
+      }
     }
+    if (corruption) throw corruption
     return null
   }
 

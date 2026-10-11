@@ -25,6 +25,12 @@
     },
     {
       "path": "../providers/google"
+    },
+    {
+      "path": "../providers/elevenlabs"
+    },
+    {
+      "path": "../storage-s3"
     }
   ]
 }

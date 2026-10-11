@@ -1,0 +1,108 @@
+name: Release verified creator packages
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: creator-npm-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - run: npm install --global pnpm@11.5.0
+      - name: Install digest-pinned secret scanner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          gh release download v8.30.1 --repo gitleaks/gitleaks --pattern gitleaks_8.30.1_linux_x64.tar.gz --dir "$RUNNER_TEMP/gitleaks"
+          cd "$RUNNER_TEMP/gitleaks"
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks_8.30.1_linux_x64.tar.gz' | sha256sum --check --strict
+          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+          echo "$RUNNER_TEMP/gitleaks" >> "$GITHUB_PATH"
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run build
+      - run: pnpm run lint
+      - run: pnpm test -- --maxWorkers=1
+      - run: pnpm run test:release
+      - run: pnpm audit --audit-level=moderate
+      - run: pnpm run verify:release
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: creator-release-${{ github.run_id }}-${{ github.sha }}
+          path: artifacts/npm-release/
+          if-no-files-found: error
+          retention-days: 7
+  consume:
+    needs: verify
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: windows-latest
+            platform: win32
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: creator-release-${{ github.run_id }}-${{ github.sha }}
+          path: artifacts/npm-release/
+      # Both consumers install the same Linux-built bytes that publication uses.
+      - run: node scripts/test-consumer.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: creator-consumer-${{ matrix.platform }}-${{ github.run_id }}-${{ github.sha }}
+          path: artifacts/npm-release/consumer.json
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: [verify, consume]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: npm-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - run: npm install --global npm@11.10.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: creator-release-${{ github.run_id }}-${{ github.sha }}
+          path: artifacts/npm-release/
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: creator-consumer-linux-${{ github.run_id }}-${{ github.sha }}
+          path: artifacts/consumer-linux/
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: creator-consumer-win32-${{ github.run_id }}-${{ github.sha }}
+          path: artifacts/consumer-win32/
+      - name: Publish verified bytes through npm OIDC
+        run: |
+          export NPM_CLI_PATH="$(npm root --global)/npm/bin/npm-cli.js"
+          node scripts/publish-release.mjs

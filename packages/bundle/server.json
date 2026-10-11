@@ -1,19 +1,20 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.frankxai/starlight-creator-mcp",
-  "description": "Sovereign creator MCP: BYOK image/video/audio generation, taste scoring, provenance ledger and human-gated publishing on your own machine.",
+  "description": "BYOK image, video and audio creation with taste scoring, provenance and confirmed publishing.",
   "repository": { "url": "https://github.com/frankxai/starlight-creator-mcp", "source": "github" },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "packages": [
     {
       "registryType": "npm",
-      "identifier": "starlight-creator-mcp",
-      "version": "0.1.0",
+      "identifier": "@starlight-intelligence/creator-mcp",
+      "version": "0.1.1",
       "transport": { "type": "stdio" },
       "environmentVariables": [
-        { "name": "OPENROUTER_API_KEY", "description": "OpenRouter key (text, images, video, transcription). Optional if stored via `starlight-creator-mcp setup`.", "isRequired": false, "isSecret": true, "format": "string" },
+        { "name": "OPENROUTER_API_KEY", "description": "OpenRouter key (text, images, video). Optional if stored via `starlight-creator-mcp setup`.", "isRequired": false, "isSecret": true, "format": "string" },
         { "name": "MUAPI_KEY", "description": "MuAPI key for the 226-model aggregated catalog.", "isRequired": false, "isSecret": true, "format": "string" },
         { "name": "GEMINI_API_KEY", "description": "Gemini key used as the vision judge.", "isRequired": false, "isSecret": true, "format": "string" },
+        { "name": "ELEVENLABS_API_KEY", "description": "ElevenLabs key for speech generation, music and sound effects. Optional if stored via `starlight-creator-mcp setup`.", "isRequired": false, "isSecret": true, "format": "string" },
         { "name": "CREATOR_PACKS", "description": "Path-delimited list of pack directories to load (defaults to the bundled starter pack).", "isRequired": false, "isSecret": false, "format": "string" }
       ]
     }

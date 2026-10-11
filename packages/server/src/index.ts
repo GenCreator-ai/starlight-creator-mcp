@@ -1,6 +1,6 @@
 export { createCreatorServer, SUBSTRATE_TOOLS, type CreatorServer, type CreatorServerOptions, type ToolCuration } from './create-server.js'
 export { defineTool, READ_ONLY, READ_ONLY_NET, GENERATES, WRITES_LOCAL, type AnyToolDef, type ToolDef } from './tool-def.js'
-export { defaultProviders, packsFromEnv, STARTER_PACK } from './defaults.js'
+export { defaultProviders, defaultStorageConnectors, packsFromEnv, STARTER_PACK } from './defaults.js'
 export { serveCreatorStdio } from './stdio.js'
 export { serveCreatorHttp, type HttpOptions } from './http.js'
 export { parsePromptFile } from './prompts.js'

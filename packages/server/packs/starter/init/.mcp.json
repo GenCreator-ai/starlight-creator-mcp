@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "creator": {
+      "command": "node",
+      "args": ["packages/bundle/dist/main.js"],
+      "_comment": "Replace args[0] with an absolute path to this repo's bundle. Do not npx starlight-creator-mcp until it exists on npm."
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "creator-pack-manifest.v1",
+  "id": "starter",
+  "name": "Starter pack",
+  "version": "0.1.0",
+  "description": "Unbranded reference pack for the creator substrate. Safe defaults for routing, a visual rubric, and an init scaffold.",
+  "license": { "type": "MIT" },
+  "publicSafe": true,
+  "canon": { "paths": ["canon/**/*.md"], "locked": "canon/CANON.md", "forbiddenPatterns": [] },
+  "rubrics": [
+    {
+      "id": "visual-taste",
+      "kind": "image",
+      "default": true,
+      "judge": { "task": "vision", "quality": "draft" },
+      "dimensions": [
+        { "id": "composition", "weight": 25, "guidance": "Hierarchy, framing, negative space, a clear subject." },
+        { "id": "lighting", "weight": 20, "guidance": "Motivated light, believable shadows, no flat fill." },
+        { "id": "color", "weight": 15, "guidance": "Restrained palette, harmony, no random gradients." },
+        { "id": "subject-clarity", "weight": 15, "guidance": "The subject reads instantly at thumbnail size." },
+        { "id": "artifacts", "weight": 25, "invert": true, "guidance": "Warped text, extra fingers, melted edges, watermarks." }
+      ],
+      "thresholds": { "ship": 80, "focused_pass": 60, "draft": 40 },
+      "autoFail": ["legible garbled text", "extra limbs", "watermark"],
+      "promptFile": "rubrics/visual-taste.md"
+    },
+    {
+      "id": "writing-clarity",
+      "kind": "text",
+      "default": true,
+      "judge": { "task": "chat", "quality": "draft" },
+      "dimensions": [
+        { "id": "truth", "weight": 30, "guidance": "Claims are specific and checkable; no invented numbers." },
+        { "id": "clarity", "weight": 30, "guidance": "One idea per sentence; no throat-clearing." },
+        { "id": "voice", "weight": 20, "guidance": "Sounds like a person, not a press release." },
+        { "id": "structure", "weight": 20, "guidance": "Hook, substance, consequence, invitation." }
+      ],
+      "thresholds": { "ship": 85, "focused_pass": 70, "draft": 50 },
+      "autoFail": [],
+      "promptFile": "rubrics/writing-clarity.md"
+    }
+  ],
+  "templates": [{ "id": "image-brief", "path": "templates/image-brief.md", "kind": "markdown", "tags": ["brief"] }],
+  "prompts": [{ "id": "shot-list", "path": "prompts/shot-list.md", "description": "Turn a scene description into a numbered shot list with camera, lens and light notes." }],
+  "styles": [
+    { "id": "cinematic", "task": "t2i", "label": "Cinematic still", "suffix": "cinematic still, 35mm, shallow depth of field, motivated practical lighting, film grain", "negative": "text, watermark, logo, extra fingers, deformed hands", "defaults": { "aspect_ratio": "16:9" } },
+    { "id": "technical-diagram", "task": "t2i", "label": "Technical diagram", "suffix": "clean vector diagram, flat colors, high contrast, generous whitespace, legible labels", "defaults": { "aspect_ratio": "16:9" } }
+  ],
+  "registry": {
+    "preferences": {
+      "t2i:high": ["nano-banana-pro", "gpt-image", "seedream", "flux-2-pro", "flux"],
+      "t2i:draft": ["flux-schnell", "nano-banana", "sdxl"],
+      "t2i:text": ["gpt-image", "ideogram", "nano-banana-pro"],
+      "i2i:high": ["nano-banana-pro", "flux-kontext", "gpt-image"],
+      "i2i:draft": ["nano-banana", "flux-kontext"],
+      "t2v:high": ["veo-3", "kling", "seedance"],
+      "t2v:draft": ["seedance", "wan", "kling"],
+      "i2v:high": ["veo-3", "kling", "seedance"],
+      "i2v:draft": ["seedance", "wan", "kling"],
+      "lipsync:high": ["kling", "sync"],
+      "lipsync:draft": ["sync"]
+    },
+    "intents": [
+      { "id": "text", "task": "t2i", "pattern": "\\b(logo|wordmark|typograph\\w*|lettering|poster|headline|slogan|banner|signage|the words|text reads|text says)\\b", "preferenceKey": "t2i:text" }
+    ]
+  },
+  "voice": {
+    "principles": ["Fewer words, more weight.", "Say what the code does, never what it might do."],
+    "bannedPhrases": ["unlock", "disrupt", "10x", "game-changing", "seamless", "revolutionary", "unleash", "supercharge"]
+  },
+  "publishing": { "channels": { "x": { "maxChars": 280 } } },
+  "init": { "dir": "init" },
+  "tags": ["starter", "reference"],
+  "author": "Frank Riemer"
+}

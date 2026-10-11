@@ -1,8 +1,13 @@
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server'
-import { resolveCanonFiles } from '@starlight-intelligence/creator-packs-spec'
+import { readPackText } from '@starlight-intelligence/creator-packs-spec'
 import type { CreatorContext } from '@starlight-intelligence/creator-core'
+
+function canonMimeType(file: string): string | null {
+  if (/\.(md|markdown)$/i.test(file)) return 'text/markdown'
+  if (/\.txt$/i.test(file)) return 'text/plain'
+  if (/\.json$/i.test(file)) return 'application/json'
+  return null
+}
 
 export function registerResources(server: McpServer, ctx: CreatorContext): void {
   const m = ctx.merged
@@ -25,11 +30,14 @@ export function registerResources(server: McpServer, ctx: CreatorContext): void 
   server.registerResource('pack-canon', new ResourceTemplate('pack://{packId}/canon/{+file}', {
     list: async () => {
       const out: Array<{ uri: string; name: string; mimeType: string }> = []
-      for (const c of m.canonPaths) for (const f of await resolveCanonFiles(c.dir, [c.pattern])) {
-        const rel = path.relative(c.dir, f).split(path.sep).join('/')
-        out.push({ uri: `pack://${c.packId}/canon/${rel}`, name: rel, mimeType: 'text/markdown' })
+      for (const file of ctx.packs.canon.files()) {
+        const mimeType = canonMimeType(file.file)
+        if (mimeType) out.push({ uri: `pack://${file.packId}/canon/${file.file}`, name: file.locked ? `${file.file} (locked)` : file.file, mimeType })
       }
-      for (const l of m.locked) if (!out.some(o => o.uri === `pack://${l.packId}/canon/${l.path}`)) out.unshift({ uri: `pack://${l.packId}/canon/${l.path}`, name: `${l.path} (locked)`, mimeType: 'text/markdown' })
+      for (const l of m.locked) {
+        const mimeType = canonMimeType(l.path)
+        if (mimeType && !out.some(o => o.uri === `pack://${l.packId}/canon/${l.path}`)) out.unshift({ uri: `pack://${l.packId}/canon/${l.path}`, name: `${l.path} (locked)`, mimeType })
+      }
       return { resources: out }
     },
   }), { title: 'Pack canon file', description: 'A canon document from a loaded pack. Locked files are the source of truth.' }, async (uri, vars) => {
@@ -37,9 +45,11 @@ export function registerResources(server: McpServer, ctx: CreatorContext): void 
     const pack = m.packs.find(p => p.id === packId)
     if (!pack) throw new Error(`pack ${packId} not loaded`)
     const rel = String(vars.file)
-    if (rel.split('/').includes('..')) throw new Error('invalid path')
-    const text = await readFile(path.join(pack.dir, rel), 'utf8')
-    return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text }] }
+    const mimeType = canonMimeType(rel)
+    if (!mimeType) throw new Error('file is not a supported text canon resource')
+    if (!ctx.packs.canon.files().some(f => f.packId === packId && f.file === rel) && !m.locked.some(f => f.packId === packId && f.path === rel)) throw new Error('canon file not declared by this pack')
+    const text = await readPackText(pack.dir, rel)
+    return { contents: [{ uri: uri.href, mimeType, text }] }
   })
 
   server.registerResource('pack-template', new ResourceTemplate('pack://{packId}/templates/{templateId}', {
@@ -47,16 +57,16 @@ export function registerResources(server: McpServer, ctx: CreatorContext): void 
   }), { title: 'Pack template' }, async (uri, vars) => {
     const t = m.templates.get(String(vars.templateId))
     if (!t || t.packId !== String(vars.packId)) throw new Error(`template ${String(vars.templateId)} not found`)
-    return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text: await readFile(path.join(t.dir, t.path), 'utf8') }] }
+    return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text: await readPackText(t.dir, t.path) }] }
   })
 
   server.registerResource('pack-rubric', new ResourceTemplate('pack://{packId}/rubrics/{rubricId}', {
     list: async () => ({ resources: [...m.rubrics.values()].map(r => ({ uri: `pack://${r.packId}/rubrics/${r.id}`, name: r.id, mimeType: 'application/json' })) }),
   }), { title: 'Pack rubric' }, async (uri, vars) => {
     const r = m.rubrics.get(String(vars.rubricId))
-    if (!r) throw new Error(`rubric ${String(vars.rubricId)} not found`)
+    if (!r || r.packId !== String(vars.packId)) throw new Error(`rubric ${String(vars.rubricId)} not found`)
     const { dir, ...rest } = r
-    const prompt = r.promptFile ? await readFile(path.join(dir, r.promptFile), 'utf8') : null
+    const prompt = r.promptFile ? await readPackText(dir, r.promptFile) : null
     return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify({ ...rest, prompt }, null, 2) }] }
   })
 

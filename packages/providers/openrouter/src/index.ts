@@ -1,5 +1,5 @@
 import {
-  guardedFetch, ProviderError, SECRET_NAMES, type FetchPolicy, type GenerationRequest, type ModelRecord, type Provider, type ProviderJob, type Task, type TextRequest, type TextResult, type Vault,
+  discardBody, guardedFetch, ProviderError, SECRET_NAMES, type FetchPolicy, type GenerationRequest, type ModelRecord, type Provider, type ProviderJob, type Task, type TextRequest, type TextResult, type Vault,
 } from '@starlight-intelligence/creator-core'
 
 export const OPENROUTER_HOST = 'openrouter.ai'
@@ -14,8 +14,8 @@ function tasksFor(m: ORModel): Task[] {
   if (outMods.includes('text')) { tasks.add('chat'); if (inMods.includes('image')) tasks.add('vision') }
   if (outMods.includes('image')) { tasks.add('t2i'); if (inMods.includes('image')) tasks.add('i2i') }
   if (outMods.includes('video')) { tasks.add('t2v'); if (inMods.includes('image')) tasks.add('i2v') }
-  if (outMods.includes('audio')) tasks.add('tts')
-  if (inMods.includes('audio') && outMods.includes('text')) tasks.add('stt')
+  // Advertise only tasks implemented by submit/text; audio modalities alone
+  // do not establish a working speech generation or transcription adapter.
   return [...tasks]
 }
 
@@ -49,7 +49,7 @@ export function createOpenRouterProvider(opts: OpenRouterProviderOptions): Provi
   return {
     id: 'openrouter',
     allowHosts: [OPENROUTER_HOST, host],
-    capabilities: () => ['chat', 'vision', 't2i', 'i2i', 't2v', 'i2v', 'stt'],
+    capabilities: () => ['chat', 'vision', 't2i', 'i2i', 't2v', 'i2v'],
     async isConfigured() { return !!(await opts.vault.resolve(SECRET_NAMES.openrouter)) },
     async listModels() {
       const data = await json<{ data: ORModel[] }>(`${base}/api/v1/models`, { method: 'GET' })
@@ -74,14 +74,25 @@ export function createOpenRouterProvider(opts: OpenRouterProviderOptions): Provi
     async poll(providerJobId: string): Promise<ProviderJob> {
       if (providerJobId.startsWith('inline-')) return { providerJobId, status: 'completed', result: { outputs: [] } }
       const data = await json<{ status: string; unsigned_urls?: string[]; usage?: { cost?: number; is_byok?: boolean }; error?: { message?: string } | string }>(`${base}/api/v1/videos/${encodeURIComponent(providerJobId)}`, { method: 'GET' })
-      if (data.status === 'failed') return { providerJobId, status: 'failed', error: typeof data.error === 'string' ? data.error : data.error?.message ?? 'video generation failed' }
-      if (data.status !== 'completed') return { providerJobId, status: data.status === 'pending' ? 'queued' : 'running' }
-      const urls = data.unsigned_urls?.length ? data.unsigned_urls : [`${base}/api/v1/videos/${encodeURIComponent(providerJobId)}/content`]
+      if (['failed', 'cancelled', 'expired'].includes(data.status)) return { providerJobId, status: data.status === 'cancelled' ? 'cancelled' : 'failed', error: typeof data.error === 'string' ? data.error : data.error?.message ?? `video generation ${data.status}` }
+      if (data.status === 'pending') return { providerJobId, status: 'queued' }
+      if (data.status === 'in_progress') return { providerJobId, status: 'running' }
+      if (data.status !== 'completed') throw new ProviderError(`unexpected openrouter video status: ${data.status}`, 'openrouter')
+      const content = `${base}/api/v1/videos/${encodeURIComponent(providerJobId)}/content`
+      const urls = data.unsigned_urls?.length ? data.unsigned_urls.map((url, index) => {
+        const resolved = new URL(url, base)
+        // The API may return external unsigned URLs. Its documented proxy retains
+        // output indices without trusting the external host or disclosing our key.
+        return resolved.origin === new URL(base).origin ? resolved.href : `${content}?index=${index}`
+      }) : [content]
       const auth = await headers()
       const outputs = []
       for (const url of urls) {
         const res = await guardedFetch(url, { headers: { Authorization: auth.Authorization }, policy: { ...policy, maxBytes: 512 * 1024 * 1024 } })
-        if (!res.ok) throw new ProviderError(`openrouter video download ${res.status}`, 'openrouter', res.status >= 500, res.status)
+        if (!res.ok) {
+          await discardBody(res)
+          throw new ProviderError(`openrouter video download ${res.status}`, 'openrouter', res.status === 429 || res.status >= 500, res.status)
+        }
         outputs.push({ bytes: new Uint8Array(await res.arrayBuffer()), mime: res.headers.get('content-type')?.split(';')[0] ?? 'video/mp4', kind: 'video' as const })
       }
       return { providerJobId, status: 'completed', result: { outputs, ...(data.usage?.cost !== undefined ? { costUsd: data.usage.cost } : {}), ...(data.usage?.is_byok !== undefined ? { isByok: data.usage.is_byok } : {}) } }

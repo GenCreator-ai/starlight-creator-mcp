@@ -29,7 +29,7 @@ const confirmSchema = z.object({ confirm: z.string().min(1), note: z.string().op
 export const publicationApprove = defineTool({
   name: 'creator_publication_approve',
   title: 'Approve publication (human)',
-  description: 'Ask the human operator to approve a prepared manifest. The client shows the manifest summary and the person types the 8-character confirm code; on match the manifest is HMAC-signed locally. Agents cannot self-approve: the code must be entered by the user. If the client cannot show forms, returns needs_cli_approval with the command to run.',
+  description: 'Request host confirmation for a prepared manifest. The client shows the summary and collects an 8-character confirmation code; on match the manifest is HMAC-signed locally. The server trusts the client confirmation channel and does not independently verify human presence. If the client cannot show forms, returns needs_cli_approval with the command to run.',
   inputSchema: z.object({ manifest_id: z.string() }),
   outputSchema: z.object({ manifest_id: z.string(), status: z.enum(['approved', 'declined', 'needs_cli_approval', 'rejected']), reason: z.string().optional(), command: z.string().optional(), signature: z.string().optional(), approved_at: z.string().optional(), expires_at: z.string().optional() }),
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -97,7 +97,7 @@ export const metricsIngest = defineTool({
   async handler(a, ctx) {
     try {
       let r: { ingested: number; skipped: number }
-      if (a.source === 'csv') { if (!a.csv_path) return toolError('csv_path required'); r = await ctx.metrics.ingestCsv(a.csv_path) }
+      if (a.source === 'csv') { if (!a.csv_path) return toolError('csv_path required'); r = await ctx.metrics.ingestCsv(a.csv_path, [process.cwd(), ctx.home]) }
       else if (a.source === 'manual') {
         r = ctx.metrics.ingestManual((a.observations ?? []).map(o => { const { publication_id, observed_at, window_hours, ...metrics } = o; return { publicationId: publication_id, ...(observed_at ? { observedAt: observed_at } : {}), ...(window_hours ? { windowHours: window_hours } : {}), metrics: Object.fromEntries(Object.entries(metrics).filter(([, v]) => v !== undefined)) as Partial<Record<MetricField, number>> } }))
       } else r = await ctx.metrics.ingestFromAdapter('postiz', a.publication_ids)
