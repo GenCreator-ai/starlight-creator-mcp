@@ -4,6 +4,9 @@ import { validatePackDir } from './validate.js'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { lintText } from './canon-lint.js'
+import { mergePacks } from './merge.js'
+import { canonSchema, registryOverridesSchema } from './schema.js'
 
 const starter = path.resolve(fileURLToPath(import.meta.url), '../../../../packs/starter')
 describe('bounded pack patterns', () => {
@@ -29,5 +32,17 @@ describe('bounded pack patterns', () => {
   it('bounds input and completes a long nonmatching adversarial prompt', () => {
     expect([...compilePackPattern('\\b(a|typograph\\w*)\\b')('a'.repeat(65_536))]).toEqual([])
     expect(() => [...compilePackPattern('logo')('a'.repeat(65_537))]).toThrow(PackPatternError)
+  })
+  it('bounds comparisons for a long nearly-matching literal', () => {
+    expect(() => [...compilePackPattern('a'.repeat(480) + 'b')('a'.repeat(65_536))]).toThrow(/work budget/)
+  })
+  it('shares the work budget across a full canon rule collection', () => {
+    const merged = mergePacks([], '0.1.0')
+    merged.forbiddenPatterns = Array.from({ length: 16 }, () => ({ packId: 'test', pattern: 'x', message: 'not allowed' }))
+    expect(() => lintText('a'.repeat(65_536), merged)).toThrow(/work budget/)
+  })
+  it('rejects excessive intent and forbidden-pattern collections at manifest parsing', () => {
+    expect(registryOverridesSchema.safeParse({ intents: Array.from({ length: 257 }, () => ({ id: 'test', task: 't2i', pattern: 'x', preferenceKey: 't2i:high' })) }).success).toBe(false)
+    expect(canonSchema.safeParse({ forbiddenPatterns: Array.from({ length: 257 }, () => ({ pattern: 'x', message: 'no' })) }).success).toBe(false)
   })
 })

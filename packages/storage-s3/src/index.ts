@@ -104,22 +104,33 @@ export class S3Storage implements StorageConnector {
         return bytes
       } finally { body.destroy() }
     } catch (err) {
-      if (isMissingObject(err)) return null
+      if (await this.isMissingObject(err, signal)) return null
       throw err
     }
   }
 
   async exists(sha256: string, ext: string): Promise<boolean> {
     try { await this.client.send(new HeadObjectCommand({ Bucket: this.o.bucket, Key: this.key(sha256, ext) })); return true } catch (err) {
-      if (isMissingObject(err)) return false
+      if (await this.isMissingObject(err)) return false
       throw err
     }
+  }
+
+  private async isMissingObject(err: unknown, signal?: AbortSignal): Promise<boolean> {
+    const e = err as { name?: string; $metadata?: { httpStatusCode?: number } }
+    if (e.name === 'NoSuchKey') return true
+    if (e.name && e.name !== 'NotFound' && e.name !== 'Error' && e.name !== '404') return false
+    if (e.$metadata?.httpStatusCode !== 404) return false
+    // Bodyless HEAD 404s do not identify whether the object or its bucket is absent.
+    // Preserve configuration/permission errors from this read-only bucket check.
+    await this.client.send(new HeadBucketCommand({ Bucket: this.o.bucket }), { abortSignal: signal })
+    return true
   }
 
   /** A public domain gives a stable URL; otherwise a presigned GET so publishing still works on a private bucket. */
   async publicUrl(sha256: string, ext: string): Promise<string | null> {
     const Key = this.key(sha256, ext)
-    if (this.o.publicDomain) return `${this.o.publicDomain.replace(/\/+$/, '')}/${Key}`
+    if (this.o.publicDomain) return `${this.o.publicDomain.replace(/\/+$/, '')}/${Key.split('/').map(encodeURIComponent).join('/')}`
     try {
       return await getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.o.bucket, Key }), { expiresIn: this.o.presignTtlSeconds ?? 7 * 24 * 3600 })
     } catch { return null }
@@ -177,11 +188,6 @@ function fetchHeaders(headers: Record<string, string>, body: unknown): Headers {
     out.set(name, value)
   }
   return out
-}
-
-function isMissingObject(err: unknown): boolean {
-  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } }
-  return e.$metadata?.httpStatusCode === 404 || e.name === 'NoSuchKey' || e.name === 'NotFound'
 }
 
 export interface S3Config {

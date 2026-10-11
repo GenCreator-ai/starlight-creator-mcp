@@ -48,7 +48,7 @@ export const styleSchema = z.object({ id: idSchema, task: taskSchema, label: z.s
 
 export const registryOverridesSchema = z.object({
   preferences: z.record(z.string().regex(/^[a-z0-9]+:[a-z0-9-]+$/), z.array(z.string())).default({}),
-  intents: z.array(z.object({ id: idSchema, task: taskSchema, pattern: z.string().min(1), preferenceKey: z.string() })).default([]),
+  intents: z.array(z.object({ id: idSchema, task: taskSchema, pattern: z.string().min(1).max(512), preferenceKey: z.string() })).max(256).default([]),
   pins: z.partialRecord(taskSchema, z.string()).default({}),
   deny: z.array(z.string()).default([]),
   providers: z.object({ prefer: z.array(z.string()).default([]) }).default({ prefer: [] }),
@@ -58,7 +58,7 @@ export const canonSchema = z.object({
   paths: z.array(z.string()).default([]),
   locked: relPath.optional(),
   entities: relPath.optional(),
-  forbiddenPatterns: z.array(z.object({ pattern: z.string().min(1), message: z.string().min(1) })).default([]),
+  forbiddenPatterns: z.array(z.object({ pattern: z.string().min(1).max(512), message: z.string().min(1) })).max(256).default([]),
   truthClasses: z.array(z.string()).default(['locked', 'soft', 'proposed']),
 })
 

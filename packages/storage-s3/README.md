@@ -19,6 +19,14 @@ including connection-time DNS checks, redirect validation, deadlines and `maxAss
 Private endpoints remain blocked; the private-host override is for isolated tests only.
 Downloads are streamed within the byte budget and verified against the content-addressed
 SHA-256; only missing objects return null. Authentication/network/size/integrity failures throw.
+Named `NoSuchBucket` and other service errors remain errors even with HTTP 404.
+An ambiguous bodyless object 404 triggers a read-only `HeadBucket` check before
+returning absence. This requires `s3:ListBucket`; denied or missing buckets fail
+instead of being reported as missing assets. Cancellation also reaches that check.
+Public-domain URLs encode individual object-key segments so spaces, `%`, `?`
+and `#` remain part of the key rather than changing the URL path/query/fragment.
+Interactive `setup --storage` stores an optional temporary-credential session
+token; blank retains a stored token and `-` deletes it when switching credentials.
 Uploads are buffered, so the SigV4-signed `Content-Length` is checked against the body and
 then derived by Fetch; `Expect: 100-continue` (unsigned, and rejected by Fetch) is disabled
 through the SDK's `expectContinueHeader: false`. Streaming request bodies are refused.

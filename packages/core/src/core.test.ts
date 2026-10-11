@@ -60,6 +60,10 @@ describe('best-of loop', () => {
 })
 
 describe('router', () => {
+  it('shares a work budget across nonmatching routing intents', () => {
+    const m = merged({ intents: Array.from({ length: 16 }, (_, i) => ({ id: `rule-${i}`, task: 't2i', pattern: 'x', preferenceKey: 't2i:high' })) })
+    expect(() => routeModel(models, m.registry, { task: 't2i', quality: 'high', prompt: 'a'.repeat(65_536) })).toThrow(/work budget/)
+  })
   it('uses pack preferences, intents and pins', () => {
     const m = merged({ preferences: { 't2i:high': ['nano-banana-pro', 'flux'], 't2i:draft': ['flux-schnell'], 't2i:text': ['gpt-image'] }, intents: [{ id: 'text', task: 't2i', pattern: '\\blogo\\b', preferenceKey: 't2i:text' }] })
     expect(routeModel(models, m.registry, { task: 't2i', quality: 'high' }).model.id).toBe('muapi/nano-banana-pro')

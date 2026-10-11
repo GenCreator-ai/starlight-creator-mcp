@@ -14,11 +14,12 @@ async function fixture(remoteBytes: Uint8Array | null) {
   const local = new LocalStorage(path.join(home, 'assets'))
   const ledger = new JsonlLedger(path.join(home, 'ledger.jsonl'))
   const connector: StorageConnector = { id: 'fixture', get: vi.fn(async () => remoteBytes), put: vi.fn(async () => ({ uri: 'fixture:asset', connector: 'fixture' })), exists: async () => true, stat: async () => ({ ok: true, detail: 'synthetic' }) }
-  const assets = new AssetStore({ ledger, local, connectors: new Map([['fixture', connector]]), substrateVersion: '0.1.0' })
+  const connectors = new Map([['fixture', connector]])
+  const assets = new AssetStore({ ledger, local, connectors, substrateVersion: '0.1.0' })
   const original = Buffer.from('original synthetic asset')
   const row = await assets.ingest({ bytes: original, mime: 'text/plain', provenance: { task: 'import' } })
   ledger.addLocation(row.sha256, connector.id, 'fixture:asset')
-  return { assets, local, row, original, connector }
+  return { assets, local, row, original, connector, ledger, connectors }
 }
 describe('content-addressed asset reads', () => {
   it('rejects remote corruption before caching, returning or synchronizing it', async () => {
@@ -29,11 +30,27 @@ describe('content-addressed asset reads', () => {
     await expect(assets.sync(row.sha256, connector.id)).rejects.toThrow(/digest mismatch/)
     expect(connector.put).not.toHaveBeenCalled()
   })
-  it('rejects corrupted local bytes without silently falling through to remote', async () => {
+  it('preserves the corruption error if no verified remote copy is available', async () => {
     const { assets, local, row, connector } = await fixture(null)
     await local.put(row.sha256, Buffer.from('tampered local asset'), { mime: row.mime, ext: 'txt' })
     await expect(assets.bytes(row.sha256)).rejects.toThrow(/digest mismatch/)
-    expect(connector.get).not.toHaveBeenCalled()
+    expect(connector.get).toHaveBeenCalledOnce()
+  })
+  it('repairs a corrupt local cache from a verified remote copy', async () => {
+    const { assets, local, row, original, connector } = await fixture(Buffer.from('original synthetic asset'))
+    await local.put(row.sha256, Buffer.from('tampered local asset'), { mime: row.mime, ext: 'txt' })
+    expect((await assets.bytes(row.sha256))?.bytes).toEqual(new Uint8Array(original))
+    expect(await local.get(row.sha256, 'txt')).toEqual(new Uint8Array(original))
+    expect(connector.get).toHaveBeenCalledOnce()
+  })
+  it('skips a corrupt replica and caches only a verified copy', async () => {
+    const { assets, local, row, original, ledger, connectors } = await fixture(Buffer.from('tampered remote asset'))
+    await unlink(local.pathFor(row.sha256, 'txt'))
+    const healthy: StorageConnector = { id: 'healthy', get: vi.fn(async () => original), put: async () => ({ connector: 'healthy', uri: 'healthy:asset' }), exists: async () => true, stat: async () => ({ ok: true, detail: 'fixture' }) }
+    ledger.addLocation(row.sha256, 'healthy', 'healthy:asset')
+    connectors.set('healthy', healthy)
+    expect((await assets.bytes(row.sha256))?.bytes).toEqual(new Uint8Array(original))
+    expect(await local.get(row.sha256, 'txt')).toEqual(new Uint8Array(original))
   })
   it('owns connector bytes before an asynchronous cache write', async () => {
     const shared = Buffer.from('original synthetic asset')

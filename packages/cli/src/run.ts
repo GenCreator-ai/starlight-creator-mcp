@@ -22,7 +22,7 @@ export interface CliBrand {
 }
 
 const SECRETS: Array<{ name: string; label: string; hint: string }> = [
-  { name: SECRET_NAMES.openrouter, label: 'OpenRouter API key', hint: 'openrouter.ai/keys — one key for text, images, video, audio' },
+  { name: SECRET_NAMES.openrouter, label: 'OpenRouter API key', hint: 'openrouter.ai/keys — one key for text, images and video' },
   { name: SECRET_NAMES.muapi, label: 'MuAPI key', hint: 'muapi.ai — 226 aggregated image/video models (optional)' },
   { name: SECRET_NAMES.fal, label: 'fal key', hint: 'fal.ai (optional)' },
   { name: SECRET_NAMES.elevenlabs, label: 'ElevenLabs key', hint: 'elevenlabs.io (optional, voice)' },
@@ -124,6 +124,10 @@ async function setup(b: CliBrand, args: string[]): Promise<number> {
       cfg.storage.connector = 'local'
       const ak = (await rl.question('S3 access key id: ')).trim(); if (ak) await vault.set(SECRET_NAMES.s3AccessKeyId, ak)
       const sk = (await rl.question('S3 secret access key: ')).trim(); if (sk) await vault.set(SECRET_NAMES.s3SecretAccessKey, sk)
+      const storedToken = await vault.get(SECRET_NAMES.s3SessionToken)
+      const token = (await rl.question(`S3 session token${storedToken ? ' [stored]' : ''} (temporary AWS credentials only; blank keeps stored, "-" deletes): `)).trim()
+      if (token === '-') await vault.delete(SECRET_NAMES.s3SessionToken)
+      else if (token) await vault.set(SECRET_NAMES.s3SessionToken, token)
     }
   }
   await saveConfig(cfg)
@@ -229,7 +233,7 @@ export function clientLaunch(b: CliBrand): { command: string; args: string[] } {
 async function approve(b: CliBrand, serverOpts: Parameters<typeof createCreatorServer>[0], args: string[]): Promise<number> {
   const id = args[0]
   if (!id) { process.stderr.write('usage: approve <manifest_id>\n'); return 2 }
-  const ctx = await CreatorContext.create({ packs: serverOpts.packs, providers: serverOpts.providers })
+  const ctx = await CreatorContext.create({ packs: serverOpts.packs, providers: serverOpts.providers, storageConnectors: defaultStorageConnectors, ...(serverOpts.packsByBenefit ? { packsByBenefit: serverOpts.packsByBenefit } : {}) })
   try {
     const m = ctx.publish.get(id)
     if (!m) { process.stderr.write(`manifest ${id} not found\n`); return 1 }

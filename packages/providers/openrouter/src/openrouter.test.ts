@@ -41,19 +41,37 @@ describe('OpenRouter releases unread error bodies', () => {
     expect(provider.capabilities()).not.toContain('stt')
   })
 
-  it('rejects a returned cross-origin video URL even when its host is allowlisted', async () => {
+  it('recovers a cross-origin video through the authenticated API proxy without contacting its host', async () => {
     let requests = 0
     const external = createServer((req, res) => { requests++; req.resume(); res.end('video') })
     await new Promise<void>(resolve => external.listen(0, '127.0.0.1', resolve))
     try {
       const media = `http://127.0.0.1:${(external.address() as { port: number }).port}/content`
-      const base = await fixture((_url, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ status: 'completed', unsigned_urls: [media] })) })
+      const base = await fixture((url, res) => {
+        if (url === '/api/v1/videos/vid/content?index=0') { res.setHeader('content-type', 'video/mp4'); res.end('video'); return }
+        res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ status: 'completed', unsigned_urls: [media] }))
+      })
+      server!.on('request', req => { if (req.url?.includes('/content?')) expect(req.headers.authorization).toBe('Bearer fixture-only') })
       const vault = await createVault({ backend: 'memory', env: {} })
       await vault.set('OPENROUTER_API_KEY', 'fixture-only')
       const provider = createOpenRouterProvider({ vault, baseUrl: base, fetchPolicy: { allowHosts: ['127.0.0.1'], allowPrivateHosts: true } })
-      await expect(provider.poll('vid', 't2v')).rejects.toThrow(/origin/)
+      expect((await provider.poll('vid', 't2v')).result?.outputs?.[0]?.bytes).toEqual(new Uint8Array(Buffer.from('video')))
       expect(requests).toBe(0)
     } finally { external.closeAllConnections(); await new Promise<void>(resolve => external.close(() => resolve())) }
+  })
+  it('preserves multiple external output indices through the documented content proxy', async () => {
+    const paths: string[] = []
+    const base = await fixture((url, res) => {
+      paths.push(url)
+      if (url.includes('/content?')) { res.setHeader('content-type', 'video/mp4'); res.end(url.endsWith('=0') ? 'first' : 'second'); return }
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ status: 'completed', unsigned_urls: ['https://storage.example.com/first.mp4', 'https://storage.example.com/second.mp4'] }))
+    })
+    const vault = await createVault({ backend: 'memory', env: {} }); await vault.set('OPENROUTER_API_KEY', 'fixture-only')
+    const provider = createOpenRouterProvider({ vault, baseUrl: base, fetchPolicy: { allowHosts: [], allowPrivateHosts: true } })
+    const result = await provider.poll('vid', 't2v')
+    expect(result.result?.outputs?.map(output => Buffer.from(output.bytes!).toString())).toEqual(['first', 'second'])
+    expect(paths).toEqual(['/api/v1/videos/vid', '/api/v1/videos/vid/content?index=0', '/api/v1/videos/vid/content?index=1'])
   })
   it('preserves authorization on same-origin video content', async () => {
     let authorized = false

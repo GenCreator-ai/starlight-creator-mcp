@@ -78,9 +78,13 @@ export function createOpenRouterProvider(opts: OpenRouterProviderOptions): Provi
       if (data.status === 'pending') return { providerJobId, status: 'queued' }
       if (data.status === 'in_progress') return { providerJobId, status: 'running' }
       if (data.status !== 'completed') throw new ProviderError(`unexpected openrouter video status: ${data.status}`, 'openrouter')
-      const urls = data.unsigned_urls?.length ? data.unsigned_urls : [`${base}/api/v1/videos/${encodeURIComponent(providerJobId)}/content`]
-      // OpenRouter content endpoints are authenticated; never send this key to a returned external origin.
-      for (const url of urls) if (new URL(url).origin !== new URL(base).origin) throw new ProviderError('openrouter video content origin differs from API origin', 'openrouter')
+      const content = `${base}/api/v1/videos/${encodeURIComponent(providerJobId)}/content`
+      const urls = data.unsigned_urls?.length ? data.unsigned_urls.map((url, index) => {
+        const resolved = new URL(url, base)
+        // The API may return external unsigned URLs. Its documented proxy retains
+        // output indices without trusting the external host or disclosing our key.
+        return resolved.origin === new URL(base).origin ? resolved.href : `${content}?index=${index}`
+      }) : [content]
       const auth = await headers()
       const outputs = []
       for (const url of urls) {

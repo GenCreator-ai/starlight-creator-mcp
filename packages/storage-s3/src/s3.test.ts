@@ -26,6 +26,14 @@ describe('S3 key layout', () => {
 })
 
 describe('public URLs', () => {
+  it('encodes key segments while preserving the public-domain path and key separators', async () => {
+    const s = storage({ prefix: 'media #?%/folder with space', publicDomain: 'https://cdn.example.com/base/' })
+    const url = new URL((await s.publicUrl(SHA, 'png'))!)
+    expect(url.hash).toBe('')
+    expect(url.search).toBe('')
+    expect(url.pathname).toBe(`/base/media%20%23%3F%25/folder%20with%20space/${SHA.slice(0, 2)}/${SHA}.png`)
+    expect(url.pathname.split('/').slice(2).map(decodeURIComponent).join('/')).toBe(s.key(SHA, 'png'))
+  })
   it('uses the public domain verbatim when configured', async () => {
     const url = await storage({ publicDomain: 'https://cdn.example.com/' }).publicUrl(SHA, 'png')
     expect(url).toBe(`https://cdn.example.com/${SHA.slice(0, 2)}/${SHA}.png`)
@@ -110,13 +118,39 @@ describe('createS3Storage', () => {
           expect(req.headers['x-amz-checksum-sha256']).toBe(Buffer.from(hash, 'hex').toString('base64'))
           expect(req.headers.authorization).toContain('SignedHeaders=')
           req.resume(); req.on('end', () => { missing = false; res.end() })
-        } else if (missing) { res.statusCode = 404; res.end() }
+        } else if (req.method === 'HEAD' && req.url!.split('?')[0] === '/assets/') { res.end() }
+        else if (missing) { res.statusCode = 404; res.end() }
         else { res.write(bytes.subarray(0, 3)); res.end(bytes.subarray(3)) }
       })
       expect(await s.get(hash, 'bin')).toBeNull()
       await s.put(hash, bytes, { mime: 'application/octet-stream', ext: 'bin' })
       expect(await s.get(hash, 'bin')).toEqual(bytes)
       await expect(s.put(SHA, bytes, { mime: 'application/octet-stream', ext: 'bin' })).rejects.toThrow('checksum mismatch')
+    })
+
+    it('surfaces a named missing bucket instead of reporting a missing object', async () => {
+      const s = await fixture((_req, res) => {
+        res.writeHead(404, { 'content-type': 'application/xml' })
+        res.end('<Error><Code>NoSuchBucket</Code><Message>Bucket does not exist</Message></Error>')
+      }, 1024, 5000)
+      await expect(s.get(hash, 'bin')).rejects.toMatchObject({ name: 'NoSuchBucket' })
+    })
+    it('checks bucket existence before classifying a bodyless object 404', async () => {
+      const requests: string[] = []
+      const s = await fixture((req, res) => { requests.push(req.url!.split('?')[0]!); res.statusCode = 404; res.end() })
+      await expect(s.exists(hash, 'bin')).rejects.toMatchObject({ $metadata: { httpStatusCode: 404 } })
+      expect(requests).toEqual([`/assets/${s.key(hash, 'bin')}`, '/assets/'])
+    })
+    it('returns absence only after the bucket exists for an ambiguous HEAD 404', async () => {
+      const s = await fixture((req, res) => { res.statusCode = req.url!.split('?')[0] === '/assets/' ? 200 : 404; res.end() })
+      expect(await s.exists(hash, 'bin')).toBe(false)
+    })
+    it('preserves a named service error even when it carries HTTP 404', async () => {
+      const s = await fixture((_req, res) => {
+        res.writeHead(404, { 'content-type': 'application/xml' })
+        res.end('<Error><Code>AccessDenied</Code><Message>Denied</Message></Error>')
+      }, 1024, 5000)
+      await expect(s.get(hash, 'bin')).rejects.toMatchObject({ name: 'AccessDenied' })
     })
 
     // Independent SigV4 verification of what actually arrived on the wire.

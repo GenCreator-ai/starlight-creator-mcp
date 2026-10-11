@@ -1,6 +1,6 @@
 import { readPackText } from './files.js'
 import type { MergedPack } from './merge.js'
-import { compilePackPattern } from './pattern.js'
+import { compilePackPattern, PackPatternBudget } from './pattern.js'
 
 export interface CanonFinding { packId: string; pattern: string; message: string; excerpt: string; index: number }
 export interface CanonLintResult { ok: boolean; findings: CanonFinding[]; unknownEntities: string[] }
@@ -27,8 +27,9 @@ export async function loadEntities(merged: MergedPack): Promise<EntityIndex> {
 
 export function lintText(text: string, merged: MergedPack, entities?: EntityIndex): CanonLintResult {
   const findings: CanonFinding[] = []
+  const budget = new PackPatternBudget()
   for (const fp of merged.forbiddenPatterns) {
-    for (const match of compilePackPattern(fp.pattern)(text)) {
+    for (const match of compilePackPattern(fp.pattern)(text, budget)) {
       const start = Math.max(0, match.index - 40)
       findings.push({ packId: fp.packId, pattern: fp.pattern, message: fp.message, excerpt: text.slice(start, match.index + match.text.length + 40).replace(/\s+/g, ' '), index: match.index })
     }
