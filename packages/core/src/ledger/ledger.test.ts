@@ -80,6 +80,14 @@ it('SQLite applies filters and pagination before decoding unrelated rows', async
 })
 
 describe('bounded JSONL replay and append', () => {
+  it('does not charge disk journal quotas to an ephemeral ledger', () => {
+    const ledger = new JsonlLedger(null, { maxJournalBytes: 1, maxRecordBytes: 1 })
+    try {
+      for (let i = 0; i < 20; i++) ledger.upsertAsset({ ...asset(1), prompt: `replacement ${i}` })
+      expect(ledger.getAsset(asset(1).sha256)?.prompt).toBe('replacement 19')
+      expect(ledger.listAssets({}).assets).toHaveLength(1)
+    } finally { ledger.close() }
+  })
   it('replays UTF-8 across chunk boundaries and rejects excess journal/record bytes', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'creator-ledger-budget-')); roots.push(root)
     const file = path.join(root, 'ledger.jsonl')

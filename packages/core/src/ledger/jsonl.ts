@@ -59,14 +59,12 @@ export class JsonlLedger implements Ledger {
   }
 
   private apply(op: Op, persist = true): void {
-    if (persist) {
+    if (persist && this.file) {
       const line = `${JSON.stringify(op)}\n`, bytes = Buffer.byteLength(line)
       if (bytes - 1 > this.maxRecordBytes) throw new RangeError('JSONL record exceeds byte budget')
       if (this.journalBytes + bytes > this.maxJournalBytes) throw new RangeError('JSONL journal exceeds byte budget; preserve it and migrate to SQLite')
-      if (this.file) {
-        mkdirSync(path.dirname(this.file), { recursive: true })
-        appendFileSync(this.file, line)
-      }
+      mkdirSync(path.dirname(this.file), { recursive: true })
+      appendFileSync(this.file, line)
       // Publish in-memory state only after the append succeeds.
       this.journalBytes += bytes
     }

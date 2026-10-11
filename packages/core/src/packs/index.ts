@@ -47,6 +47,7 @@ export class CanonIndex {
     const lockedFiles = new Set(merged.locked.map(l => path.resolve(l.dir, l.path)))
     for (const entry of merged.canonPaths) {
       for (const file of await resolveCanonFiles(entry.dir, [entry.pattern])) {
+        if (!/\.(md|markdown|txt|json)$/i.test(file)) continue
         const rel = path.relative(entry.dir, file).split(path.sep).join('/')
         const key = `${entry.packId}:${rel}`
         if (files.has(key)) continue

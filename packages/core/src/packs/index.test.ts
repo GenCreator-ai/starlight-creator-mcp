@@ -57,7 +57,7 @@ describe('private pack free sections', () => {
     expect(chunks.every(c => c.text.length <= 4000)).toBe(true)
     expect(chunks.some(c => c.text.includes('useful tail'))).toBe(true)
   })
-  it('retains declared empty and non-markdown files independently of search chunks', async () => {
+  it('retains declared empty and non-markdown text files independently of search chunks', async () => {
     await fixture()
     await writeFile(path.join(dir, 'canon/empty.md'), ' \n ')
     const manifest = packManifestSchema.parse({ schemaVersion: PACK_SCHEMA_VERSION, id: 'fixture', name: 'Fixture', version: '1.0.0', license: { type: 'MIT' }, canon: { paths: ['canon/*', 'canon/*.md'] } })
@@ -66,6 +66,14 @@ describe('private pack free sections', () => {
     expect(index.files()).toContainEqual({ packId: 'fixture', file: 'canon/entities.json', chunks: 0, locked: false })
     expect(index.files().filter(f => f.file === 'canon/locked.md')).toHaveLength(1)
     expect(index.files().find(f => f.file === 'canon/locked.md')?.chunks).toBe(1)
+  })
+  it('excludes binary matches from the declared text canon resource list', async () => {
+    await fixture()
+    await writeFile(path.join(dir, 'canon/image.png'), Buffer.from([137, 80, 78, 71, 0, 255]))
+    const manifest = packManifestSchema.parse({ schemaVersion: PACK_SCHEMA_VERSION, id: 'fixture', name: 'Fixture', version: '1.0.0', license: { type: 'MIT' }, canon: { paths: ['canon/**/*'] } })
+    const index = await CanonIndex.build(mergePacks([{ dir, manifest, digest: 'a'.repeat(64) }], '0.1.0'))
+    expect(index.files().map(file => file.file)).not.toContain('canon/image.png')
+    expect(index.files().map(file => file.file)).toContain('canon/entities.json')
   })
   it('removes locked canon and entity references when canon is not licensed', async () => {
     const opts = await fixture(), packs = await loadPacks([dir], '0.1.0', opts)

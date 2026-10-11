@@ -25,6 +25,10 @@ returning absence. This requires `s3:ListBucket`; denied or missing buckets fail
 instead of being reported as missing assets. Cancellation also reaches that check.
 Public-domain URLs encode individual object-key segments so spaces, `%`, `?`
 and `#` remain part of the key rather than changing the URL path/query/fragment.
+Prefixes containing a standalone `.` or `..` segment are rejected before any
+request: URL normalization can otherwise point to a different object. Ordinary
+dot-containing names such as `.hidden` and `..backup` remain supported. See
+[AWS object-key guidance](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html#object-key-guidelines).
 Interactive `setup --storage` stores an optional temporary-credential session
 token; blank retains a stored token and `-` deletes it when switching credentials.
 Uploads are buffered, so the SigV4-signed `Content-Length` is checked against the body and

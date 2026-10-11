@@ -1,7 +1,13 @@
-import path from 'node:path'
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server'
-import { readPackText, resolveCanonFiles } from '@starlight-intelligence/creator-packs-spec'
+import { readPackText } from '@starlight-intelligence/creator-packs-spec'
 import type { CreatorContext } from '@starlight-intelligence/creator-core'
+
+function canonMimeType(file: string): string | null {
+  if (/\.(md|markdown)$/i.test(file)) return 'text/markdown'
+  if (/\.txt$/i.test(file)) return 'text/plain'
+  if (/\.json$/i.test(file)) return 'application/json'
+  return null
+}
 
 export function registerResources(server: McpServer, ctx: CreatorContext): void {
   const m = ctx.merged
@@ -24,11 +30,14 @@ export function registerResources(server: McpServer, ctx: CreatorContext): void 
   server.registerResource('pack-canon', new ResourceTemplate('pack://{packId}/canon/{+file}', {
     list: async () => {
       const out: Array<{ uri: string; name: string; mimeType: string }> = []
-      for (const c of m.canonPaths) for (const f of await resolveCanonFiles(c.dir, [c.pattern])) {
-        const rel = path.relative(c.dir, f).split(path.sep).join('/')
-        out.push({ uri: `pack://${c.packId}/canon/${rel}`, name: rel, mimeType: 'text/markdown' })
+      for (const file of ctx.packs.canon.files()) {
+        const mimeType = canonMimeType(file.file)
+        if (mimeType) out.push({ uri: `pack://${file.packId}/canon/${file.file}`, name: file.locked ? `${file.file} (locked)` : file.file, mimeType })
       }
-      for (const l of m.locked) if (!out.some(o => o.uri === `pack://${l.packId}/canon/${l.path}`)) out.unshift({ uri: `pack://${l.packId}/canon/${l.path}`, name: `${l.path} (locked)`, mimeType: 'text/markdown' })
+      for (const l of m.locked) {
+        const mimeType = canonMimeType(l.path)
+        if (mimeType && !out.some(o => o.uri === `pack://${l.packId}/canon/${l.path}`)) out.unshift({ uri: `pack://${l.packId}/canon/${l.path}`, name: `${l.path} (locked)`, mimeType })
+      }
       return { resources: out }
     },
   }), { title: 'Pack canon file', description: 'A canon document from a loaded pack. Locked files are the source of truth.' }, async (uri, vars) => {
@@ -36,9 +45,11 @@ export function registerResources(server: McpServer, ctx: CreatorContext): void 
     const pack = m.packs.find(p => p.id === packId)
     if (!pack) throw new Error(`pack ${packId} not loaded`)
     const rel = String(vars.file)
+    const mimeType = canonMimeType(rel)
+    if (!mimeType) throw new Error('file is not a supported text canon resource')
     if (!ctx.packs.canon.files().some(f => f.packId === packId && f.file === rel) && !m.locked.some(f => f.packId === packId && f.path === rel)) throw new Error('canon file not declared by this pack')
     const text = await readPackText(pack.dir, rel)
-    return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text }] }
+    return { contents: [{ uri: uri.href, mimeType, text }] }
   })
 
   server.registerResource('pack-template', new ResourceTemplate('pack://{packId}/templates/{templateId}', {

@@ -23,9 +23,17 @@ describe('S3 key layout', () => {
   it('always uses forward slashes so Windows keys are not corrupted', () => {
     expect(storage({ prefix: 'a' }).key(SHA, 'webp')).not.toContain('\\')
   })
+  it.each(['.', '..', './media', '../media', 'media/./x', 'media/../x', '/media/../'])('rejects normalization-sensitive dot segments in prefix %s', prefix => {
+    expect(() => storage({ prefix })).toThrow(/dot segments/)
+  })
 })
 
 describe('public URLs', () => {
+  it.each(['.hidden/..backup', 'folder.with.dots', '%2e/%2e%2e'])('preserves dot-containing names that are not relative segments: %s', async prefix => {
+    const s = storage({ prefix, publicDomain: 'https://cdn.example.com/' })
+    const url = new URL((await s.publicUrl(SHA, 'png'))!)
+    expect(url.pathname.slice(1).split('/').map(decodeURIComponent).join('/')).toBe(s.key(SHA, 'png'))
+  })
   it('encodes key segments while preserving the public-domain path and key separators', async () => {
     const s = storage({ prefix: 'media #?%/folder with space', publicDomain: 'https://cdn.example.com/base/' })
     const url = new URL((await s.publicUrl(SHA, 'png'))!)

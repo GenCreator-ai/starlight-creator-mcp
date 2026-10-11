@@ -32,6 +32,7 @@ export class S3Storage implements StorageConnector {
     while (start < end && prefix[start] === '/') start++
     while (end > start && prefix[end - 1] === '/') end--
     this.prefix = prefix.slice(start, end)
+    if (this.prefix.split('/').some(segment => segment === '.' || segment === '..')) throw new Error('S3 prefix contains dot segments; use literal folder names')
     this.maxBytes = o.fetchPolicy?.maxBytes ?? 200 * 1024 * 1024
     const policy: FetchPolicy = { ...o.fetchPolicy, allowHosts: o.fetchPolicy?.allowHosts ?? [], maxBytes: this.maxBytes }
     this.client = new S3Client({
