@@ -43,7 +43,8 @@ pre-release implementation, which omitted those contents.
 
 Unknown-entity detection uses the loaded entity-index type labels, with a simple
 English singular form for `s` / `ies` plurals. It only checks a type label followed
-by a capitalized one-word name, using the combined known names and aliases.
+by a capitalized one-word name, optionally separated by a comma or colon, using
+the combined known names and aliases.
 It does not inject a brand vocabulary or classify arbitrary proper nouns.
 Multiword entity names and irregular plurals need explicit aliases/type labels
 and are outside this detector's current scope.

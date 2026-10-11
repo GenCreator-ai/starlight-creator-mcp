@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { PACK_SCHEMA_VERSION } from '@starlight-intelligence/creator-packs-spec'
@@ -18,6 +18,38 @@ async function fixture() {
 }
 afterEach(async () => { if (dir) await rm(dir, { recursive: true, force: true }) })
 describe('private pack free sections', () => {
+  it.each([
+    { free: [], licensed: false, registry: false, voice: false, canon: false },
+    { free: ['registry'], licensed: false, registry: true, voice: false, canon: false },
+    { free: ['voice'], licensed: false, registry: false, voice: true, canon: false },
+    { free: ['canon'], licensed: false, registry: false, voice: false, canon: true },
+    { free: [], licensed: true, registry: true, voice: true, canon: true },
+  ])('applies only authorized private rules for free=$free licensed=$licensed', async ({ free, licensed, registry, voice, canon }) => {
+    const opts = await fixture()
+    const manifest = JSON.parse(await readFile(path.join(dir, 'pack.json'), 'utf8'))
+    manifest.offer = { free, paid: ['registry', 'voice', 'canon'].filter(section => !free.includes(section)) }
+    manifest.registry = { preferences: { 't2i:high': ['private-model'] }, intents: [{ id: 'private-rule', task: 't2i', pattern: 'private', preferenceKey: 't2i:high' }], deny: ['private-denial'], pins: { t2i: 'private-model' }, providers: { prefer: ['private-provider'] } }
+    manifest.voice = { bannedPhrases: ['private-phrase'], principles: ['private-principle'], register: 'private-register', avoid: ['private-avoid'], files: ['canon/locked.md'] }
+    manifest.canon.forbiddenPatterns = [{ pattern: 'private-rule', message: 'private-message' }]
+    manifest.canon.truthClasses = ['private-truth']
+    await writeFile(path.join(dir, 'pack.json'), JSON.stringify(manifest))
+    const packs = await loadPacks([dir], '0.1.0', { ...opts, ...(licensed ? { licensedPackIds: new Set(['private-fixture']) } : {}) })
+    expect(packs.merged.registry.intents.length > 0).toBe(registry)
+    expect(packs.merged.registry.preferences['t2i:high'] !== undefined).toBe(registry)
+    expect(packs.merged.registry.deny.length > 0).toBe(registry)
+    expect(packs.merged.registry.pins.t2i !== undefined).toBe(registry)
+    expect(packs.merged.registry.providers.prefer.length > 0).toBe(registry)
+    expect(packs.merged.voice.bannedPhrases.length > 0).toBe(voice)
+    expect(packs.merged.voice.principles.length > 0).toBe(voice)
+    expect(packs.merged.voice.register !== undefined).toBe(voice)
+    expect(packs.merged.voice.avoid.length > 0).toBe(voice)
+    expect(packs.merged.voice.files.length > 0).toBe(voice)
+    expect(packs.merged.forbiddenPatterns.length > 0).toBe(canon)
+    expect(packs.loaded[0]!.manifest.canon.truthClasses.includes('private-truth')).toBe(canon)
+    expect(packs.merged.locked.length > 0).toBe(canon)
+    expect(packs.merged.entities.length > 0).toBe(canon)
+    expect(packs.canon.files().length > 0).toBe(canon)
+  })
   it('retains all long canon section text across bounded chunks without splitting a surrogate pair', () => {
     const body = 'x'.repeat(3999) + '\u{1f30d}' + ' useful tail '.repeat(800)
     const chunks = chunkMarkdown(body, 'fixture', 'long.md', false)

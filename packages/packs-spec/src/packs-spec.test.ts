@@ -115,6 +115,13 @@ describe('canon lint', () => {
 })
 
 describe('pack-driven entity vocabulary', () => {
+  it('recognizes comma and colon apposition after a type label without accepting unknown names', () => {
+    const merged = mergePacks([], '0.1.0')
+    const entities = { byType: { projects: [{ name: 'Atlas', aliases: [] }] }, names: new Set(['atlas']) }
+    expect(lintText('The project, Orion.', merged, entities).unknownEntities).toEqual(['Orion'])
+    expect(lintText('The project: Orion.', merged, entities).unknownEntities).toEqual(['Orion'])
+    expect(lintText('The project, Atlas.', merged, entities).ok).toBe(true)
+  })
   const merged = mergePacks([], '0.1.0')
   const entities = { byType: { projects: [{ name: 'Atlas', aliases: ['North'] }], regions: [{ name: 'West', aliases: [] }] }, names: new Set(['atlas', 'north', 'west']) }
   it('finds unknown names using the loaded types, including singular labels', () => {

@@ -49,13 +49,14 @@ export function lintText(text: string, merged: MergedPack, entities?: EntityInde
     for (let i = 1; i < words.length; i++) {
       const name = words[i]![0]
       if (!/^[A-Z]/.test(name)) continue
-      // Only adjacent type + capitalized one-word names are candidates. Arbitrary proper nouns are not classified.
+      // Adjacent type + capitalized one-word names may have a comma/colon separator.
       for (const label of labels) {
         const count = label.split(' ').length
         if (i < count) continue
         const previous = words.slice(i - count, i)
         const start = previous[0]!.index!, end = words[i]!.index!
-        if (text.slice(start, end).trim().toLowerCase().replace(/\s+/g, ' ') === label) candidates.add(name)
+        const prefix = text.slice(start, end).trim().replace(/[,:]$/, '').trim().toLowerCase().replace(/\s+/g, ' ')
+        if (prefix === label) candidates.add(name)
       }
     }
     for (const c of candidates) if (!entities.names.has(c.toLowerCase())) unknownEntities.push(c)
