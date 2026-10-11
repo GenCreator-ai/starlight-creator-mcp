@@ -41,6 +41,17 @@ Uploaders **must** send `Content-Type: <mime>` and
 Both headers are signed; S3 verifies the body checksum. Treat the URL as a short-lived
 bearer capability and never log it. Browser requests require matching bucket CORS rules.
 Presigning performs no upload and does not prove credentials or write permission work.
+All object operations require a lowercase 64-character hexadecimal SHA-256 and
+an extension of 1 to 16 lowercase ASCII letters or digits, without a leading dot.
+Invalid components fail before constructing a key, signing a capability or making
+a request. Custom extensions outside this format must migrate before using this connector.
+`publicUrl` verifies the object at the currently configured bucket and prefix with
+HeadObject before returning either a public-domain or presigned download URL.
+An absent key returns null; permission, bucket and network failures remain errors.
+After changing storage settings, resynchronize assets to the new location before
+publishing them. This does not migrate recorded locations, verify CDN mappings or
+guarantee that an object remains available after the check. Operators must keep
+the configured public domain mapped to the bucket and prefix.
 `doctor` performs no writes. It first sends HeadBucket (`s3:ListBucket`): a 404 fails as a
 missing bucket and a 403 fails as indeterminate access. It then HEADs a missing probe key; 404
 is reachable, while 403 is indeterminate access, not proof of rejected credentials. It fails

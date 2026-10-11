@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createS3Storage, S3Storage } from './index.js'
 import { configSchema, createVault } from '@starlight-intelligence/creator-core'
 import { createServer, type Server } from 'node:http'
@@ -12,6 +12,15 @@ function storage(overrides: Partial<ConstructorParameters<typeof S3Storage>[0]> 
 }
 
 describe('S3 key layout', () => {
+  it.each([
+    ['short', 'png'], ['g'.repeat(64), 'png'], ['A'.repeat(64), 'png'],
+    [SHA, '../../../bb/other'], [SHA, '..\\..\\other'], [SHA, 'png/../jpg'],
+    [SHA, ''], [SHA, 'png?download'], [SHA, 'png#other'], [SHA, '.png'],
+  ])('refuses unsafe digest or extension before signing: %s / %s', async (digest, ext) => {
+    const s = storage()
+    expect(() => s.key(digest, ext)).toThrow(/S3 (digest|extension)/)
+    await expect(s.presignUpload(digest, ext, 'image/png')).rejects.toThrow(/S3 (digest|extension)/)
+  })
   it('mirrors the local content-addressed layout', () => {
     expect(storage().key(SHA, 'png')).toBe(`${SHA.slice(0, 2)}/${SHA}.png`)
   })
@@ -29,6 +38,9 @@ describe('S3 key layout', () => {
 })
 
 describe('public URLs', () => {
+  // These cases isolate URL/signature formatting; actual HEAD behavior is tested below.
+  beforeEach(() => { vi.spyOn(S3Storage.prototype, 'exists').mockResolvedValue(true) })
+  afterEach(() => { vi.restoreAllMocks() })
   it.each(['.hidden/..backup', 'folder.with.dots', '%2e/%2e%2e'])('preserves dot-containing names that are not relative segments: %s', async prefix => {
     const s = storage({ prefix, publicDomain: 'https://cdn.example.com/' })
     const url = new URL((await s.publicUrl(SHA, 'png'))!)
@@ -86,6 +98,7 @@ describe('createS3Storage', () => {
       AWS_ACCESS_KEY_ID: 'fixture-access', AWS_SECRET_ACCESS_KEY: 'fixture-secret', AWS_SESSION_TOKEN: 'fixture-session',
     } })
     const s3 = await createS3Storage(vault, { bucket: 'assets', region: 'us-east-1' })
+    vi.spyOn(s3!, 'exists').mockResolvedValue(true)
     expect(new URL(await s3!.publicUrl(SHA, 'png')).searchParams.get('X-Amz-Security-Token')).toBe('fixture-session')
     expect(vault.redactor.redact('fixture-session')).not.toContain('fixture-session')
   })
@@ -107,13 +120,14 @@ describe('createS3Storage', () => {
       if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server!.close(() => resolve())) }
       server = undefined
     })
-    async function fixture(handler: Parameters<typeof createServer>[0], maxBytes = 16, timeoutMs = 100, sessionToken?: string) {
+    async function fixture(handler: Parameters<typeof createServer>[0], maxBytes = 16, timeoutMs = 100, sessionToken?: string, overrides: Partial<ConstructorParameters<typeof S3Storage>[0]> = {}) {
       server = createServer(handler)
       await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))
       return storage({
         ...(sessionToken ? { sessionToken } : {}),
         endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
         fetchPolicy: { allowHosts: [], allowPrivateHosts: true, maxBytes, timeoutMs },
+        ...overrides,
       })
     }
     const bytes = Buffer.from('asset fixture')
@@ -152,6 +166,35 @@ describe('createS3Storage', () => {
     it('returns absence only after the bucket exists for an ambiguous HEAD 404', async () => {
       const s = await fixture((req, res) => { res.statusCode = req.url!.split('?')[0] === '/assets/' ? 200 : 404; res.end() })
       expect(await s.exists(hash, 'bin')).toBe(false)
+    })
+    it('refuses the absent new-prefix key despite an existing old replica and recovers after resynchronization', async () => {
+      const requests: string[] = []
+      let currentKeyPresent = false
+      const s = await fixture((req, res) => {
+        requests.push(`${req.method} ${req.url!.split('?')[0]}`)
+        if (req.method === 'PUT') {
+          req.resume(); req.on('end', () => { currentKeyPresent = true; res.end() })
+        } else {
+          const path = req.url!.split('?')[0]
+          res.statusCode = path === '/assets/' || path === `/assets/old/${hash.slice(0, 2)}/${hash}.bin` || currentKeyPresent ? 200 : 404
+          res.end()
+        }
+      }, 16, 5000, undefined, { prefix: 'new' })
+      // A recorded old location does not prove the currently configured key exists.
+      expect(await s.publicUrl(hash, 'bin')).toBeNull()
+      expect(requests).toEqual([`HEAD /assets/${s.key(hash, 'bin')}`, 'HEAD /assets/'])
+      await s.put(hash, bytes, { mime: 'application/octet-stream', ext: 'bin' })
+      const url = new URL((await s.publicUrl(hash, 'bin'))!)
+      expect(url.pathname).toBe(`/assets/${s.key(hash, 'bin')}`)
+      expect(url.searchParams.has('X-Amz-Signature')).toBe(true)
+      expect(requests.at(-1)).toBe(`HEAD /assets/${s.key(hash, 'bin')}`)
+    })
+    it.each([403, 500])('preserves HTTP %s when checking a public-domain location', async status => {
+      const methods: string[] = []
+      const s = await fixture((req, res) => { methods.push(req.method!); res.statusCode = status; res.end() },
+        16, 5000, undefined, { publicDomain: 'https://cdn.example.com' })
+      await expect(s.publicUrl(hash, 'bin')).rejects.toMatchObject({ $metadata: { httpStatusCode: status } })
+      expect(methods).toEqual(['HEAD'])
     })
     it('preserves a named service error even when it carries HTTP 404', async () => {
       const s = await fixture((_req, res) => {

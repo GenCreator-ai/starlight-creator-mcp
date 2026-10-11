@@ -67,6 +67,8 @@ export class S3Storage implements StorageConnector {
   }
 
   key(sha256: string, ext: string): string {
+    if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error('S3 digest must be a lowercase hexadecimal SHA-256')
+    if (!/^[a-z0-9]{1,16}$/.test(ext)) throw new Error('S3 extension must contain 1 to 16 lowercase ASCII letters or digits')
     const rel = assetRelPath(sha256, ext).replace(/\\/g, '/')
     return this.prefix ? `${this.prefix}/${rel}` : rel
   }
@@ -131,6 +133,9 @@ export class S3Storage implements StorageConnector {
   /** A public domain gives a stable URL; otherwise a presigned GET so publishing still works on a private bucket. */
   async publicUrl(sha256: string, ext: string): Promise<string | null> {
     const Key = this.key(sha256, ext)
+    // Persisted locations can outlive a bucket/prefix change. Never advertise an
+    // unverified current location merely because local URL construction succeeds.
+    if (!await this.exists(sha256, ext)) return null
     if (this.o.publicDomain) return `${this.o.publicDomain.replace(/\/+$/, '')}/${Key.split('/').map(encodeURIComponent).join('/')}`
     try {
       return await getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.o.bucket, Key }), { expiresIn: this.o.presignTtlSeconds ?? 7 * 24 * 3600 })
