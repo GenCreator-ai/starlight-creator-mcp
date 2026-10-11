@@ -17,6 +17,7 @@ The MCP client (Claude, Cursor, Antigravity, Codex) is the principal. The substr
 ## Filesystem
 - Writes are confined by `resolveInside()`: no absolute paths, no `..`, no UNC, symlink escape checked. Roots: `~/.creator-mcp`, the configured assets directory, the `init` target. `init` refuses a workspace `.creator-mcp` that is a symbolic link, junction or file before writing anything.
 - Local asset and provenance reads/writes resolve existing parent directories before access, including when the destination has not been created. Outward symbolic links/junctions are denied. Temporary writes use unique names and exclusive creation before rename. These path checks are not a race-proof OS sandbox: operators must protect the storage root and its parents from concurrent untrusted filesystem mutation.
+- `AssetStore.bytes` copies and verifies local and connector-supplied bytes against the requested SHA-256 before returning, caching or synchronizing them. A digest mismatch throws; corrupt bytes are neither cached nor silently replaced. This verifies content identity, not the truth of provenance metadata or the trustworthiness of a public URL.
 - No shell strings. `rclone` is invoked with `execFile` and an argument array.
 
 ## Pack data
